@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Toystaller: WhatsApp Edition",
+  "version": "6.0",
+  "description": "Download and open high-quality images and videos from WhatsApp Web — Chats, Status, and Media Viewer.",
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  },
+  "permissions": [
+    "webRequest",
+    "activeTab",
+    "scripting",
+    "downloads",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://web.whatsapp.com/*",
+    "*://*.whatsapp.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://web.whatsapp.com/*"],
+      "js": [
+        "platform.js",
+        "core/overlay_manager.js",
+        "core/content_core.js",
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "platform.js",
+        "core/interceptor_core.js"
+      ],
+      "matches": ["*://web.whatsapp.com/*"]
+    }
+  ],
+  "action": {
+    "default_title": "Toystaller: WhatsApp Edition",
+    "default_icon": "icon.png"
+  }
+}
