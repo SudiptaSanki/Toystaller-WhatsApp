@@ -44,6 +44,7 @@ Toystaller operates **100% client-side** inside your browser. It directly access
 
 ---
 
+
 ## 🛠️ Technology Stack & Architecture
 
 Toystaller is built from the ground up with **Pure Modern Vanilla JavaScript** (ES2022+), zero third-party dependencies, and adheres strictly to **Google Chrome Manifest V3 specifications**.
