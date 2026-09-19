@@ -30,6 +30,9 @@ Version 3/
 Version 4/
 Version 5/
 
+# Chrome unpacked metadata
+_metadata/
+
 # Scratch files
 fb_mobile.html
 old_page_interceptor.js

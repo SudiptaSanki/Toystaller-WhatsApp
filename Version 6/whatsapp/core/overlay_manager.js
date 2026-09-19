@@ -1,7 +1,7 @@
 // overlay_manager.js
 // Tracks media elements and positions action buttons safely on document.body.
-// v4: Section-aware modal suppression, zero-bleed backdrop isolation, smart corner placement,
-//     clamped-inside-frame positioning, per-section toggle support.
+// WhatsApp Edition: Section-aware modal suppression, zero-bleed backdrop isolation, smart corner placement,
+// clamped-inside-frame positioning, per-section toggle support.
 
 class OverlayManager {
     constructor() {
@@ -11,10 +11,10 @@ class OverlayManager {
 
         // Per-section toggle settings (loaded from chrome.storage)
         this._sectionToggles = {
-            toystaller_show_grid:    true,
-            toystaller_show_feed:    true,
-            toystaller_show_stories: true,
-            toystaller_show_dm:      true
+            toystaller_wa_chat:         true,
+            toystaller_wa_status:       true,
+            toystaller_wa_media_viewer: true,
+            toystaller_wa_profile:      true
         };
         this._loadToggles();
 
@@ -45,7 +45,7 @@ class OverlayManager {
                 childList: true,
                 subtree: true,
                 attributes: true,
-                attributeFilter: ['role', 'aria-modal', 'class', 'data-animate-media-viewer', 'data-animate-status-v3']
+                attributeFilter: ['role', 'aria-modal', 'class', 'data-animate-media-viewer', 'data-animate-status-v3', 'data-testid']
             });
         }
 
@@ -73,18 +73,10 @@ class OverlayManager {
         if (!platform || !platform.getSection) return false;
         const section = platform.getSection();
 
-        // Reels, modals, and standalone posts are ALWAYS enabled (never toggled off)
-        if (section === 'reels' || section === 'modal' || section === 'post_standalone') return false;
-
-        // Map sections to toggle keys
-        if (section === 'feed')    return !this._sectionToggles.toystaller_show_feed;
-        if (section === 'stories') return !this._sectionToggles.toystaller_show_stories;
-        if (section === 'direct')  return !this._sectionToggles.toystaller_show_dm;
-
-        // All profile grid sections and explore → grid toggle
-        if (section.startsWith('profile_') || section === 'explore') {
-            return !this._sectionToggles.toystaller_show_grid;
-        }
+        if (section === 'wa-chat')         return !this._sectionToggles.toystaller_wa_chat;
+        if (section === 'wa-status')       return !this._sectionToggles.toystaller_wa_status;
+        if (section === 'wa-media-viewer') return !this._sectionToggles.toystaller_wa_media_viewer;
+        if (section === 'wa-profile')      return !this._sectionToggles.toystaller_wa_profile;
 
         return false;
     }
@@ -134,7 +126,7 @@ class OverlayManager {
             const wRatio = rect.width / mediaRect.width;
             const hRatio = rect.height / mediaRect.height;
 
-            if (wRatio >= 0.8 && wRatio <= 1.35 && hRatio >= 0.8 && hRatio <= 1.35) {
+            if (wRatio >= 0.8 && wRatio <= 1.4 && hRatio >= 0.8 && hRatio <= 1.4) {
                 host = node;
             } else {
                 break;
@@ -145,6 +137,11 @@ class OverlayManager {
     }
 
     _isClippedByAncestor(media) {
+        const platform = this._getPlatform();
+        if (platform && platform.isInsideModal && platform.isInsideModal(media)) {
+            return false;
+        }
+
         const mediaRect = media.getBoundingClientRect();
         if (mediaRect.width === 0 || mediaRect.height === 0) return true;
 
@@ -175,7 +172,7 @@ class OverlayManager {
                     const intersectArea = intersectWidth * intersectHeight;
                     const mediaArea = mediaRect.width * mediaRect.height;
                     
-                    if (intersectArea / mediaArea < 0.4) {
+                    if (intersectArea / mediaArea < 0.35) {
                         return true;
                     }
                 }
@@ -211,7 +208,6 @@ class OverlayManager {
 
         // 1. Check if hovering directly over an existing button
         for (const [media, entry] of this.overlays.entries()) {
-            // Modal isolation: If a modal is open, strictly ignore any media not inside the modal
             if (hasModal && platform && platform.isInsideModal && !platform.isInsideModal(media)) {
                 if (entry.container.style.display !== 'none') {
                     entry.container.style.display = 'none';
@@ -228,7 +224,6 @@ class OverlayManager {
                 return;
             }
 
-            // Skip if visually clipped inside a scroll container
             if (this._isClippedByAncestor(media)) continue;
 
             const hoverRect = this._getHoverRect(media, entry);
@@ -242,7 +237,7 @@ class OverlayManager {
             return;
         }
 
-        // 2. Use document.elementsFromPoint to ensure we only trigger elements that the user is actually hovering
+        // 2. Use document.elementsFromPoint
         const hits = document.elementsFromPoint(x, y);
         if (!hits || hits.length === 0) {
             this._scheduleHide();
@@ -259,12 +254,30 @@ class OverlayManager {
                     if (!matchedCandidates.includes(candidate)) {
                         matchedCandidates.push(candidate);
                     }
+                } else {
+                    const parentContainer = media.closest('[data-animate-media-viewer="true"], div[role="dialog"], div[data-testid="media-viewer"], [data-animate-status-v3="true"], div[data-testid="status-v3-main"], div[data-testid="status-viewer"], div[role="row"], div[data-testid="msg-container"]');
+                    if (parentContainer && (parentContainer === el || parentContainer.contains(el))) {
+                        if (!this.isSiteControl(el, media)) {
+                            if (!matchedCandidates.includes(candidate)) {
+                                matchedCandidates.push(candidate);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (matchedCandidates.length === 0 && hoverCandidates.length > 0) {
+            const modalCandidate = hoverCandidates.find(c => platform && platform.isInsideModal && platform.isInsideModal(c.media));
+            if (modalCandidate) {
+                const hitSiteControl = hits.some(el => this.isSiteControl(el, modalCandidate.media));
+                if (!hitSiteControl) {
+                    matchedCandidates.push(modalCandidate);
                 }
             }
         }
 
         if (matchedCandidates.length > 0) {
-            // Prioritize <video> tags over <img> tags (e.g. poster images covering the video)
             const videoCandidate = matchedCandidates.find(c => c.media.tagName.toLowerCase() === 'video');
             if (videoCandidate) {
                 this._show(videoCandidate.entry);
@@ -274,8 +287,6 @@ class OverlayManager {
             return;
         }
 
-        // If no candidate was actually hit by elementsFromPoint (e.g. hovering on dialog background / comments),
-        // hide any active overlay rather than guessing incorrectly.
         this._scheduleHide();
     }
 
@@ -305,7 +316,7 @@ class OverlayManager {
                 this._hide(entry);
             }
             this.activeEntry = null;
-        }, 250);
+        }, 300);
     }
 
     addOverlay(media, createButtonsFn) {
@@ -386,9 +397,6 @@ class OverlayManager {
         if (el.closest('.magic-dl-overlay')) return false;
         if (el === media || media.contains(el)) return false;
 
-        const entry = this.overlays.get(media);
-        if (entry && (el === entry.hoverHost || entry.hoverHost.contains(el))) return false;
-
         const tag = el.tagName.toLowerCase();
         const role = (el.getAttribute('role') || '').toLowerCase();
         const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
@@ -399,7 +407,7 @@ class OverlayManager {
 
         const controlHints = ['close', 'dismiss', 'minimize', 'expand', 'fullscreen', 'menu', 'more', 'options', 'share',
                                'mute', 'unmute', 'volume', 'sound', 'play', 'pause', 'like', 'comment', 'follow',
-                               'audio', 'speaker', 'forward', 'rewind', 'skip', 'next', 'previous', 'seek'];
+                               'audio', 'speaker', 'forward', 'rewind', 'skip', 'next', 'previous', 'seek', 'star'];
         const hintText = `${ariaLabel} ${title} ${className}`;
         if (controlHints.some(hint => hintText.includes(hint))) return true;
 
@@ -407,257 +415,234 @@ class OverlayManager {
         if (role === 'button' || role === 'menuitem') return true;
         if (el.closest('button, [role="button"], [role="menuitem"]')) return true;
 
+        // Header controls inside WhatsApp status or media viewer dialog
+        if (el.closest('header, [data-testid*="header"], [data-testid="status-header"], [data-testid="status-v3-main"] > div:first-child')) return true;
+        if (el.closest('button[aria-label*="Play" i], button[aria-label*="Pause" i], button[aria-label*="Mute" i], button[aria-label*="Unmute" i], button[aria-label*="Close" i], button[aria-label*="More" i]')) return true;
+
         const style = window.getComputedStyle(el);
         if (style.pointerEvents !== 'none' && parseInt(style.zIndex, 10) > 5000) return true;
 
         return false;
     }
 
-    getPlatformConfig() {
+    getPlatformConfig(media) {
         const platform = this._getPlatform();
         if (platform && platform.getPlatformConfig) {
-            return platform.getPlatformConfig(window.location.pathname.toLowerCase());
+            return platform.getPlatformConfig(media || window.location.pathname.toLowerCase());
         }
-        return { preferredCorners: ['top-left', 'bottom-left', 'top-right'], padding: 12 };
+        return { preferredCorners: ['top-right', 'top-left', 'bottom-right'], padding: 12 };
     }
 
     cornerHasConflict(media, rect, corner, width, height, pad = 12) {
-        const config = this.getPlatformConfig();
+        const config = this.getPlatformConfig(media);
         const topOffset = config.topOffset || 0;
-        let x;
-        let y;
+        const bottomOffset = config.bottomOffset || 0;
+        let left;
+        let top;
 
         switch (corner) {
             case 'bottom-right':
-                x = rect.right - pad - width / 2;
-                y = rect.bottom - pad - height / 2;
+                left = rect.right - width - pad;
+                top = rect.bottom - height - pad - bottomOffset;
                 break;
             case 'bottom-left':
-                x = rect.left + pad + width / 2;
-                y = rect.bottom - pad - height / 2;
+                left = rect.left + pad;
+                top = rect.bottom - height - pad - bottomOffset;
                 break;
             case 'top-left':
-                x = rect.left + pad + width / 2;
-                y = rect.top + pad + topOffset + height / 2;
+                left = rect.left + pad;
+                top = rect.top + pad + topOffset;
                 break;
             case 'top-right':
-                x = rect.right - pad - width / 2;
-                y = rect.top + pad + topOffset + height / 2;
-                break;
             default:
-                return true;
+                left = rect.right - width - pad;
+                top = rect.top + pad + topOffset;
+                break;
         }
 
-        if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
-            return true;
-        }
+        // Test multiple points across the proposed button bounds
+        const testPoints = [
+            { x: left + 6, y: top + 6 },
+            { x: left + width / 2, y: top + height / 2 },
+            { x: left + width - 6, y: top + 6 },
+            { x: left + width - 6, y: top + height - 6 },
+            { x: left + 6, y: top + height - 6 }
+        ];
 
-        const hits = document.elementsFromPoint(x, y);
-        for (const el of hits) {
-            if (this.isSiteControl(el, media)) return true;
+        for (const pt of testPoints) {
+            const elements = document.elementsFromPoint(pt.x, pt.y);
+            for (const el of elements) {
+                if (this.isSiteControl(el, media)) {
+                    return true;
+                }
+            }
         }
         return false;
     }
 
-    pickBestCorner(media, rect, container) {
-        const width = container.offsetWidth || 80;
-        const height = container.offsetHeight || 36;
-        const config = this.getPlatformConfig();
+    chooseCorner(media, rect, width, height) {
+        const config = this.getPlatformConfig(media);
+        const preferred = config.preferredCorners || ['top-right', 'top-left', 'bottom-right'];
+        const pad = config.padding !== undefined ? config.padding : 12;
 
-        const corners = [...config.preferredCorners];
-
-        for (const corner of corners) {
-            if (!this.cornerHasConflict(media, rect, corner, width, height, config.padding)) {
+        for (const corner of preferred) {
+            if (!this.cornerHasConflict(media, rect, corner, width, height, pad)) {
                 return corner;
             }
         }
-
-        return corners[0] || 'top-left';
+        return preferred[0] || 'top-right';
     }
 
-    // Compute the actually visible portion of a media element by intersecting
-    // its rect with all overflow-clipping ancestors and the viewport.
-    _getVisibleRect(media) {
-        let vRect = media.getBoundingClientRect();
-        let visTop = vRect.top;
-        let visLeft = vRect.left;
-        let visBottom = vRect.bottom;
-        let visRight = vRect.right;
+    _getVisibleClampedRect(media) {
+        const mediaRect = media.getBoundingClientRect();
+        if (mediaRect.width === 0 || mediaRect.height === 0) return null;
+
+        const platform = this._getPlatform();
+        if (platform && platform.isInsideModal && platform.isInsideModal(media)) {
+            return mediaRect;
+        }
+
+        let clipLeft   = mediaRect.left;
+        let clipTop    = mediaRect.top;
+        let clipRight  = mediaRect.right;
+        let clipBottom = mediaRect.bottom;
 
         let node = media.parentElement;
         let depth = 0;
         while (node && node !== document.body && node !== document.documentElement && depth < 15) {
             if (node.nodeType === Node.ELEMENT_NODE) {
                 const style = window.getComputedStyle(node);
-                const ov = style.overflow + style.overflowX + style.overflowY;
-                if (ov.includes('hidden') || ov.includes('scroll') || ov.includes('auto') || ov.includes('clip')) {
-                    const pRect = node.getBoundingClientRect();
-                    visTop = Math.max(visTop, pRect.top);
-                    visLeft = Math.max(visLeft, pRect.left);
-                    visBottom = Math.min(visBottom, pRect.bottom);
-                    visRight = Math.min(visRight, pRect.right);
+                if (style.overflow === 'hidden' || style.overflow === 'scroll' || style.overflow === 'auto' ||
+                    style.overflowY === 'hidden' || style.overflowY === 'scroll' || style.overflowY === 'auto' ||
+                    style.overflowX === 'hidden' || style.overflowX === 'scroll' || style.overflowX === 'auto') {
+                    const parentRect = node.getBoundingClientRect();
+                    clipLeft   = Math.max(clipLeft,   parentRect.left);
+                    clipTop    = Math.max(clipTop,    parentRect.top);
+                    clipRight  = Math.min(clipRight,  parentRect.right);
+                    clipBottom = Math.min(clipBottom, parentRect.bottom);
                 }
             }
             node = node.parentElement;
             depth++;
         }
 
-        // Also clamp to viewport
-        visTop = Math.max(visTop, 0);
-        visLeft = Math.max(visLeft, 0);
-        visBottom = Math.min(visBottom, window.innerHeight);
-        visRight = Math.min(visRight, window.innerWidth);
+        if (clipRight <= clipLeft || clipBottom <= clipTop) {
+            return null;
+        }
 
         return {
-            top: visTop,
-            left: visLeft,
-            bottom: visBottom,
-            right: visRight,
-            width: Math.max(0, visRight - visLeft),
-            height: Math.max(0, visBottom - visTop)
+            left: clipLeft,
+            top: clipTop,
+            right: clipRight,
+            bottom: clipBottom,
+            width: clipRight - clipLeft,
+            height: clipBottom - clipTop
         };
     }
 
-    applyCornerPosition(rect, container, corner, media) {
-        const config = this.getPlatformConfig();
-        const pad = config.padding;
-        const topOffset = config.topOffset || 0;
-        const width = container.offsetWidth || 80;
-        const height = container.offsetHeight || 36;
-
-        let top, left;
-
-        switch (corner) {
-            case 'bottom-right':
-                top = rect.bottom - height - pad;
-                left = rect.right - width - pad;
-                break;
-            case 'bottom-left':
-                top = rect.bottom - height - pad;
-                left = rect.left + pad;
-                break;
-            case 'top-left':
-                top = rect.top + pad + topOffset;
-                left = rect.left + pad;
-                break;
-            case 'top-right':
-                top = rect.top + pad + topOffset;
-                left = rect.right - width - pad;
-                break;
-            default:
-                top = rect.top + pad + topOffset;
-                left = rect.left + pad;
-        }
-
-        // Compute the VISIBLE portion of the media (accounts for sticky headers,
-        // overflow-hidden ancestors, and viewport edges)
-        const vis = media ? this._getVisibleRect(media) : rect;
-
-        // CLAMP: Ensure buttons stay INSIDE the VISIBLE media frame
-        const minTop = vis.top + 2;
-        const maxTop = vis.bottom - height - 2;
-        const minLeft = vis.left + 2;
-        const maxLeft = vis.right - width - 2;
-
-        top = Math.max(minTop, Math.min(top, maxTop));
-        left = Math.max(minLeft, Math.min(left, maxLeft));
-
-        container.style.top = `${top}px`;
-        container.style.left = `${left}px`;
-    }
-
     updatePosition(media, container) {
-        const entry = this.overlays.get(media);
-        if (!entry) return;
-
         if (!media.isConnected) {
-            entry.resizeObserver.disconnect();
-            if (entry.intersectionObserver) entry.intersectionObserver.disconnect();
             container.remove();
-            if (this.activeEntry === entry) this.activeEntry = null;
+            const entry = this.overlays.get(media);
+            if (entry) {
+                entry.resizeObserver.disconnect();
+                if (entry.intersectionObserver) entry.intersectionObserver.disconnect();
+                if (this.activeEntry === entry) this.activeEntry = null;
+            }
             this.overlays.delete(media);
             return;
         }
 
         const platform = this._getPlatform();
         const hasModal = platform && platform.hasActiveModal ? platform.hasActiveModal() : false;
-
-        // Modal isolation check
         if (hasModal && platform && platform.isInsideModal && !platform.isInsideModal(media)) {
             container.style.display = 'none';
             container.style.visibility = 'hidden';
-            container.style.pointerEvents = 'none';
-            if (this.activeEntry === entry) this.activeEntry = null;
             return;
         }
 
-        // Per-section toggle check
         if (this._isSectionDisabledByToggle()) {
             container.style.display = 'none';
             container.style.visibility = 'hidden';
-            container.style.pointerEvents = 'none';
-            if (this.activeEntry === entry) this.activeEntry = null;
             return;
         }
 
-        // Section thumbnail/eligibility check
-        if (platform && platform.isThumbnail && platform.isThumbnail(media)) {
+        const rect = this._getVisibleClampedRect(media);
+
+        if (!rect || rect.width < 50 || rect.height < 50) {
             container.style.display = 'none';
-            container.style.visibility = 'hidden';
-            container.style.pointerEvents = 'none';
-            if (this.activeEntry === entry) this.activeEntry = null;
             return;
         }
 
-        const rect = media.getBoundingClientRect();
-        const style = window.getComputedStyle(media);
-        const isStyleHidden = style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none';
+        const config = this.getPlatformConfig(media);
+        const pad = config.padding !== undefined ? config.padding : 12;
+        const topOffset = config.topOffset || 0;
+        const bottomOffset = config.bottomOffset || 0;
 
-        if (rect.width === 0 || rect.height === 0 || !entry.isVisible || isStyleHidden || this._isClippedByAncestor(media)) {
-            container.style.display = 'none';
-            container.style.visibility = 'hidden';
-            container.style.pointerEvents = 'none';
-            return;
+        const overlayWidth = container.offsetWidth || 84;
+        const overlayHeight = container.offsetHeight || 34;
+
+        const corner = this.chooseCorner(media, rect, overlayWidth, overlayHeight);
+        const entry = this.overlays.get(media);
+        if (entry) entry.corner = corner;
+
+        let left;
+        let top;
+
+        switch (corner) {
+            case 'bottom-right':
+                left = rect.right - overlayWidth - pad;
+                top = rect.bottom - overlayHeight - pad - bottomOffset;
+                break;
+            case 'bottom-left':
+                left = rect.left + pad;
+                top = rect.bottom - overlayHeight - pad - bottomOffset;
+                break;
+            case 'top-left':
+                left = rect.left + pad;
+                top = rect.top + pad + topOffset;
+                break;
+            case 'top-right':
+            default:
+                left = rect.right - overlayWidth - pad;
+                top = rect.top + pad + topOffset;
+                break;
         }
 
-        const fullyAbove = rect.bottom < 0;
-        const fullyBelow = rect.top > window.innerHeight;
-        const fullyLeft = rect.right < 0;
-        const fullyRight = rect.left > window.innerWidth;
-
-        if (fullyAbove || fullyBelow || fullyLeft || fullyRight) {
-            container.style.display = 'none';
-            container.style.visibility = 'hidden';
-            container.style.pointerEvents = 'none';
-            return;
+        const section = platform && platform.getSection ? platform.getSection(media) : '';
+        if (section === 'wa-status') {
+            // HARD CLAMP FOR STATUS:
+            // Top must NEVER be inside the header (y < 90px) where Play/Pause/Mute reside
+            if (corner.startsWith('top')) {
+                top = Math.max(90, top);
+            } else {
+                top = Math.min(window.innerHeight - overlayHeight - 80, top);
+            }
+            // Clamp within viewport horizontally
+            left = Math.max(16, Math.min(left, window.innerWidth - overlayWidth - 16));
+        } else if (section === 'wa-media-viewer') {
+            if (corner === 'top-right') {
+                top = Math.max(72, top);
+            }
+            left = Math.max(rect.left + 2, Math.min(left, rect.right - overlayWidth - 2));
+            top = Math.max(rect.top + 2, Math.min(top, rect.bottom - overlayHeight - 2));
+        } else {
+            left = Math.max(rect.left + 2, Math.min(left, rect.right - overlayWidth - 2));
+            top = Math.max(rect.top + 2, Math.min(top, rect.bottom - overlayHeight - 2));
         }
 
-        container.style.display = 'flex';
-        if (this.activeEntry === entry) {
-            container.style.visibility = 'visible';
-            container.style.opacity = '1';
-            container.style.pointerEvents = 'auto';
-        }
-
-        const corner = this.pickBestCorner(media, rect, container);
-        entry.corner = corner;
-        this.applyCornerPosition(rect, container, corner, media);
+        container.style.left = `${left}px`;
+        container.style.top = `${top}px`;
     }
 
     updateAllPositions() {
-        const platform = this._getPlatform();
-        const hasModal = platform && platform.hasActiveModal ? platform.hasActiveModal() : false;
-
-        // If an active modal is open and the activeEntry is outside the modal, instantly reset it
-        if (hasModal && this.activeEntry && platform && platform.isInsideModal && !platform.isInsideModal(this.activeEntry.hoverHost)) {
-            this._hide(this.activeEntry);
-            this.activeEntry = null;
-        }
-
         for (const [media, entry] of this.overlays.entries()) {
             this.updatePosition(media, entry.container);
         }
     }
 }
 
-window.magicOverlayManager = new OverlayManager();
+window.MagicOverlayManager = OverlayManager;
+if (!window.magicOverlayManager) {
+    window.magicOverlayManager = new OverlayManager();
+}

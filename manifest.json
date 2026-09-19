@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Toystaller: Instagram Edition",
+  "name": "Toystaller: WhatsApp Edition",
   "version": "6.0",
-  "description": "Specialized HD media extractor for Instagram — Reels, Stories, Posts, Profiles, and DMs.",
+  "description": "Specialized HD media downloader for WhatsApp Web — Chat images & videos, Status updates, and Media Lightbox.",
   "icons": {
     "16": "Toystaller_logo.png",
     "48": "Toystaller_logo.png",
@@ -10,8 +10,6 @@
   },
   "permissions": [
     "webRequest",
-    "declarativeNetRequest",
-    "declarativeNetRequestWithHostAccess",
     "activeTab",
     "scripting",
     "downloads",
@@ -19,42 +17,37 @@
     "storage"
   ],
   "host_permissions": [
-    "*://*.instagram.com/*"
+    "*://web.whatsapp.com/*",
+    "*://*.whatsapp.net/*"
   ],
   "background": {
     "service_worker": "background_script.js"
   },
   "content_scripts": [
     {
-      "matches": ["*://*.instagram.com/*"],
+      "matches": ["*://web.whatsapp.com/*"],
       "js": [
-        "platforms/instagram.js",
+        "platforms/whatsapp.js",
         "overlay_manager.js",
+        "core/content_core.js",
         "content_script.js"
       ],
       "run_at": "document_start"
     }
   ],
-  "declarative_net_request": {
-    "rule_resources": [
-      {
-        "id": "ruleset_1",
-        "enabled": true,
-        "path": "rules.json"
-      }
-    ]
-  },
   "web_accessible_resources": [
     {
       "resources": [
+        "platforms/whatsapp.js",
         "page_interceptor.js",
-        "platforms/instagram.js"
+        "viewer.html",
+        "viewer.js"
       ],
-      "matches": ["*://*.instagram.com/*"]
+      "matches": ["*://web.whatsapp.com/*"]
     }
   ],
   "action": {
-    "default_title": "Toystaller: Instagram Edition",
+    "default_title": "Toystaller: WhatsApp Edition",
     "default_icon": "Toystaller_logo.png",
     "default_popup": "popup.html"
   }

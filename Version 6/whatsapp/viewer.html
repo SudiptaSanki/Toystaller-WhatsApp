@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Media — Toystaller</title>
+    <link rel="icon" href="icon.png">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #0b141a;
+            color: #e9edef;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* Top Navigation Header */
+        header {
+            height: 60px;
+            background: rgba(17, 27, 33, 0.92);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            z-index: 50;
+            flex-shrink: 0;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .logo-img {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+        .media-info {
+            display: flex;
+            flex-direction: column;
+        }
+        .media-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e9edef;
+            letter-spacing: 0.2px;
+        }
+        .media-subtitle {
+            font-size: 11px;
+            color: #8696a0;
+            max-width: 380px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Action Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            text-decoration: none;
+            transition: all 0.15s ease;
+        }
+        .btn-download {
+            background: #25D366;
+            color: #111b21;
+            box-shadow: 0 2px 8px rgba(37, 211, 102, 0.3);
+        }
+        .btn-download:hover {
+            background: #1ebe5d;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 211, 102, 0.4);
+        }
+        .btn-download:active {
+            transform: translateY(0);
+        }
+        .btn-icon {
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.07);
+            color: #d1d7db;
+        }
+        .btn-icon:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: #fff;
+        }
+
+        /* Central Media Viewport */
+        main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            padding: 20px;
+            background: radial-gradient(circle at center, #111b21 0%, #0b141a 100%);
+            overflow: hidden;
+        }
+
+        video, img {
+            max-width: 100%;
+            max-height: calc(100vh - 120px);
+            object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.9);
+            display: none;
+        }
+
+        /* Loading Spinner */
+        .spinner-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            color: #8696a0;
+        }
+        .spinner {
+            width: 44px;
+            height: 44px;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #25D366;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Error state */
+        .error-box {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            text-align: center;
+            color: #ef4444;
+            max-width: 400px;
+        }
+
+        /* Bottom Hint Bar */
+        footer {
+            height: 34px;
+            background: rgba(11, 20, 26, 0.8);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            font-size: 11px;
+            color: #667781;
+            flex-shrink: 0;
+        }
+        footer kbd {
+            background: rgba(255, 255, 255, 0.1);
+            color: #d1d7db;
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <img class="logo-img" src="icon.png" alt="Toystaller">
+            <div class="media-info">
+                <span class="media-title" id="mediaTitle">WhatsApp Media Viewer</span>
+                <span class="media-subtitle" id="mediaSubtitle">Loading decrypted media...</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <button class="btn btn-icon" id="pipBtn" title="Picture-in-Picture" style="display: none;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><rect x="11" y="9" width="9" height="7" rx="1" ry="1"></rect></svg>
+            </button>
+            <button class="btn btn-icon" id="fullscreenBtn" title="Fullscreen (F)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>
+            </button>
+            <a class="btn btn-download" id="downloadBtn" href="#" download="">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                Download
+            </a>
+        </div>
+    </header>
+
+    <main id="viewport">
+        <div class="spinner-box" id="spinnerBox">
+            <div class="spinner"></div>
+            <span>Loading original decrypted media...</span>
+        </div>
+
+        <video id="mediaVideo" controls autoplay loop playsinline></video>
+        <img id="mediaImg" alt="WhatsApp Image">
+
+        <div class="error-box" id="errorBox">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            <span id="errorMessage">Unable to retrieve media from WhatsApp session.</span>
+        </div>
+    </main>
+
+    <footer>
+        <span><kbd>Space</kbd> Play/Pause</span>
+        <span><kbd>M</kbd> Mute</span>
+        <span><kbd>F</kbd> Fullscreen</span>
+        <span><kbd>D</kbd> Download</span>
+    </footer>
+
+    <script src="viewer.js"></script>
+</body>
+</html>
