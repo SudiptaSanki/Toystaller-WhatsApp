@@ -1,7 +1,10 @@
 // overlay_manager.js
 // Tracks media elements and positions action buttons safely on document.body.
-// WhatsApp Edition: Section-aware modal suppression, zero-bleed backdrop isolation, smart corner placement,
-// clamped-inside-frame positioning, per-section toggle support.
+// Toystaller v1.0 (Specialized WhatsApp Edition):
+// - Permanently locked corners per media element (never jumps down on scroll)
+// - Clean disappearance when media scrolls behind sticky headers / navbars
+// - Section-aware modal isolation (Chats, Status, Media Lightbox, Profile)
+// - Clamped ancestor visibility checking and per-section toggles
 
 class OverlayManager {
     constructor() {
@@ -32,7 +35,13 @@ class OverlayManager {
         document.addEventListener('mousemove', this._onMouseMove, true);
         document.addEventListener('pointermove', this._onMouseMove, true);
 
-        window.addEventListener('scroll', () => this.updateAllPositions(), true);
+        window.addEventListener('scroll', () => {
+            if (this.activeEntry) {
+                this._hide(this.activeEntry);
+                this.activeEntry = null;
+            }
+            this.updateAllPositions();
+        }, { passive: true, capture: true });
         window.addEventListener('resize', () => this.updateAllPositions());
 
         // Instant modal listener — when a dialog/modal opens or closes, immediately sync overlay visibility
@@ -68,10 +77,10 @@ class OverlayManager {
         } catch(e) { /* storage unavailable */ }
     }
 
-    _isSectionDisabledByToggle() {
+    _isSectionDisabledByToggle(media) {
         const platform = this._getPlatform();
         if (!platform || !platform.getSection) return false;
-        const section = platform.getSection();
+        const section = platform.getSection(media);
 
         if (section === 'wa-chat')         return !this._sectionToggles.toystaller_wa_chat;
         if (section === 'wa-status')       return !this._sectionToggles.toystaller_wa_status;
@@ -79,6 +88,26 @@ class OverlayManager {
         if (section === 'wa-profile')      return !this._sectionToggles.toystaller_wa_profile;
 
         return false;
+    }
+
+    _getTopNavHeight(media) {
+        const platform = this._getPlatform();
+        const section = platform && platform.getSection ? platform.getSection(media) : '';
+        if (section === 'wa-status') {
+            return 85;
+        }
+        if (section === 'wa-media-viewer') {
+            return 60;
+        }
+        // Active chat conversation header
+        const chatHeader = document.querySelector('#main header, div[data-testid="conversation-header"], header');
+        if (chatHeader) {
+            const hRect = chatHeader.getBoundingClientRect();
+            if (hRect.top <= 10 && hRect.bottom >= 40 && hRect.bottom <= 120) {
+                return hRect.bottom;
+            }
+        }
+        return 59;
     }
 
     _getPlatform() {
@@ -128,51 +157,34 @@ class OverlayManager {
 
             if (wRatio >= 0.8 && wRatio <= 1.4 && hRatio >= 0.8 && hRatio <= 1.4) {
                 host = node;
-            } else {
+            }
+
+            if (node.tagName.toLowerCase() === 'article' ||
+                node.getAttribute('role') === 'row' ||
+                node.getAttribute('data-testid') === 'msg-container') {
                 break;
             }
         }
-
         return host;
     }
 
-    _isClippedByAncestor(media) {
-        const platform = this._getPlatform();
-        if (platform && platform.isInsideModal && platform.isInsideModal(media)) {
-            return false;
-        }
+    _pointInRect(x, y, rect) {
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    }
 
-        const mediaRect = media.getBoundingClientRect();
-        if (mediaRect.width === 0 || mediaRect.height === 0) return true;
-
-        let node = media.parentElement;
+    _isClippedByAncestor(el) {
+        const elRect = el.getBoundingClientRect();
+        let node = el.parentElement;
         let depth = 0;
 
-        while (node && node !== document.body && node !== document.documentElement && depth < 15) {
+        while (node && node !== document.body && node !== document.documentElement && depth < 12) {
             if (node.nodeType === Node.ELEMENT_NODE) {
                 const style = window.getComputedStyle(node);
-                if (style.overflow === 'hidden' || style.overflow === 'scroll' || style.overflow === 'auto' || 
-                    style.overflowY === 'hidden' || style.overflowY === 'scroll' || style.overflowY === 'auto' ||
-                    style.overflowX === 'hidden' || style.overflowX === 'scroll' || style.overflowX === 'auto') {
-                    
-                    const parentRect = node.getBoundingClientRect();
-                    
-                    const intersectLeft = Math.max(mediaRect.left, parentRect.left);
-                    const intersectTop = Math.max(mediaRect.top, parentRect.top);
-                    const intersectRight = Math.min(mediaRect.right, parentRect.right);
-                    const intersectBottom = Math.min(mediaRect.bottom, parentRect.bottom);
-                    
-                    const intersectWidth = intersectRight - intersectLeft;
-                    const intersectHeight = intersectBottom - intersectTop;
-                    
-                    if (intersectWidth <= 0 || intersectHeight <= 0) {
-                        return true;
-                    }
-                    
-                    const intersectArea = intersectWidth * intersectHeight;
-                    const mediaArea = mediaRect.width * mediaRect.height;
-                    
-                    if (intersectArea / mediaArea < 0.35) {
+                const ov = style.overflow + style.overflowX + style.overflowY;
+                if (ov.includes('hidden') || ov.includes('scroll') || ov.includes('auto') || ov.includes('clip')) {
+                    const pRect = node.getBoundingClientRect();
+                    if (elRect.bottom < pRect.top || elRect.top > pRect.bottom ||
+                        elRect.right < pRect.left || elRect.left > pRect.right) {
                         return true;
                     }
                 }
@@ -181,10 +193,6 @@ class OverlayManager {
             depth++;
         }
         return false;
-    }
-
-    _pointInRect(x, y, rect) {
-        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
     _getHoverRect(media, entry) {
@@ -407,7 +415,7 @@ class OverlayManager {
 
         const controlHints = ['close', 'dismiss', 'minimize', 'expand', 'fullscreen', 'menu', 'more', 'options', 'share',
                                'mute', 'unmute', 'volume', 'sound', 'play', 'pause', 'like', 'comment', 'follow',
-                               'audio', 'speaker', 'forward', 'rewind', 'skip', 'next', 'previous', 'seek', 'star'];
+                               'audio', 'speaker', 'forward', 'rewind', 'skip', 'next', 'previous', 'seek', 'star', 'reply'];
         const hintText = `${ariaLabel} ${title} ${className}`;
         if (controlHints.some(hint => hintText.includes(hint))) return true;
 
@@ -480,10 +488,12 @@ class OverlayManager {
         return false;
     }
 
-    chooseCorner(media, rect, width, height) {
+    pickBestCorner(media, rect, container) {
         const config = this.getPlatformConfig(media);
         const preferred = config.preferredCorners || ['top-right', 'top-left', 'bottom-right'];
         const pad = config.padding !== undefined ? config.padding : 12;
+        const width = container.offsetWidth || 84;
+        const height = container.offsetHeight || 34;
 
         for (const corner of preferred) {
             if (!this.cornerHasConflict(media, rect, corner, width, height, pad)) {
@@ -493,149 +503,236 @@ class OverlayManager {
         return preferred[0] || 'top-right';
     }
 
-    _getVisibleClampedRect(media) {
-        const mediaRect = media.getBoundingClientRect();
-        if (mediaRect.width === 0 || mediaRect.height === 0) return null;
-
-        const platform = this._getPlatform();
-        if (platform && platform.isInsideModal && platform.isInsideModal(media)) {
-            return mediaRect;
-        }
-
-        let clipLeft   = mediaRect.left;
-        let clipTop    = mediaRect.top;
-        let clipRight  = mediaRect.right;
-        let clipBottom = mediaRect.bottom;
+    // Compute the actually visible portion of a media element by intersecting
+    // its rect with all overflow-clipping ancestors and the viewport.
+    _getVisibleRect(media) {
+        let vRect = media.getBoundingClientRect();
+        let visTop = vRect.top;
+        let visLeft = vRect.left;
+        let visBottom = vRect.bottom;
+        let visRight = vRect.right;
 
         let node = media.parentElement;
         let depth = 0;
         while (node && node !== document.body && node !== document.documentElement && depth < 15) {
             if (node.nodeType === Node.ELEMENT_NODE) {
                 const style = window.getComputedStyle(node);
-                if (style.overflow === 'hidden' || style.overflow === 'scroll' || style.overflow === 'auto' ||
-                    style.overflowY === 'hidden' || style.overflowY === 'scroll' || style.overflowY === 'auto' ||
-                    style.overflowX === 'hidden' || style.overflowX === 'scroll' || style.overflowX === 'auto') {
-                    const parentRect = node.getBoundingClientRect();
-                    clipLeft   = Math.max(clipLeft,   parentRect.left);
-                    clipTop    = Math.max(clipTop,    parentRect.top);
-                    clipRight  = Math.min(clipRight,  parentRect.right);
-                    clipBottom = Math.min(clipBottom, parentRect.bottom);
+                const ov = style.overflow + style.overflowX + style.overflowY;
+                if (ov.includes('hidden') || ov.includes('scroll') || ov.includes('auto') || ov.includes('clip')) {
+                    const pRect = node.getBoundingClientRect();
+                    visTop = Math.max(visTop, pRect.top);
+                    visLeft = Math.max(visLeft, pRect.left);
+                    visBottom = Math.min(visBottom, pRect.bottom);
+                    visRight = Math.min(visRight, pRect.right);
                 }
             }
             node = node.parentElement;
             depth++;
         }
 
-        if (clipRight <= clipLeft || clipBottom <= clipTop) {
-            return null;
-        }
+        const platform = this._getPlatform();
+        const inModal = platform && platform.isInsideModal ? platform.isInsideModal(media) : false;
+        const topLimit = inModal ? 0 : this._getTopNavHeight(media);
+
+        visTop = Math.max(visTop, topLimit);
+        visLeft = Math.max(visLeft, 0);
+        visBottom = Math.min(visBottom, window.innerHeight);
+        visRight = Math.min(visRight, window.innerWidth);
 
         return {
-            left: clipLeft,
-            top: clipTop,
-            right: clipRight,
-            bottom: clipBottom,
-            width: clipRight - clipLeft,
-            height: clipBottom - clipTop
+            top: visTop,
+            left: visLeft,
+            bottom: visBottom,
+            right: visRight,
+            width: Math.max(0, visRight - visLeft),
+            height: Math.max(0, visBottom - visTop)
         };
     }
 
-    updatePosition(media, container) {
-        if (!media.isConnected) {
-            container.remove();
-            const entry = this.overlays.get(media);
-            if (entry) {
-                entry.resizeObserver.disconnect();
-                if (entry.intersectionObserver) entry.intersectionObserver.disconnect();
-                if (this.activeEntry === entry) this.activeEntry = null;
+    applyCornerPosition(rect, container, corner, media) {
+        const config = this.getPlatformConfig(media);
+        const pad = config.padding !== undefined ? config.padding : 12;
+        const topOffset = config.topOffset || 0;
+        const bottomOffset = config.bottomOffset || 0;
+        const width = container.offsetWidth || 84;
+        const height = container.offsetHeight || 34;
+
+        let top, left;
+
+        switch (corner) {
+            case 'bottom-right':
+                top = rect.bottom - height - pad - bottomOffset;
+                left = rect.right - width - pad;
+                break;
+            case 'bottom-left':
+                top = rect.bottom - height - pad - bottomOffset;
+                left = rect.left + pad;
+                break;
+            case 'top-left':
+                top = rect.top + pad + topOffset;
+                left = rect.left + pad;
+                break;
+            case 'top-right':
+            default:
+                top = rect.top + pad + topOffset;
+                left = rect.right - width - pad;
+                break;
+        }
+
+        const platform = this._getPlatform();
+        const section = platform && platform.getSection ? platform.getSection(media) : 'wa-chat';
+        const inModal = platform && platform.isInsideModal ? platform.isInsideModal(media) : false;
+        const isStatus = section === 'wa-status';
+        const topNavHeight = inModal ? (isStatus ? 85 : 0) : this._getTopNavHeight(media);
+
+        // 1. Strict Top Boundary:
+        // As media scrolls, keep button locked in place! When its corner reaches under the top navbar/header,
+        // HIDE it cleanly — NEVER dynamically jump down to bottom-right or slide along the header!
+        if (top < topNavHeight + 4) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+            return;
+        }
+
+        // 2. Status reply drawer / bottom bounds:
+        if (isStatus) {
+            if (top + height > window.innerHeight - 75) {
+                container.style.display = 'none';
+                container.style.visibility = 'hidden';
+                return;
             }
+        }
+
+        // 3. Viewport Boundaries:
+        if (top + height > window.innerHeight - 4 || left < 2 || left + width > window.innerWidth - 2) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+            return;
+        }
+
+        // 4. Overflow container / ancestor clipping:
+        const vis = media ? this._getVisibleRect(media) : rect;
+        if (top < vis.top - 2 || top + height > vis.bottom + 2 || left < vis.left - 2 || left + width > vis.right + 2) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+            return;
+        }
+
+        container.style.top = `${top}px`;
+        container.style.left = `${left}px`;
+    }
+
+    updatePosition(media, container) {
+        const entry = this.overlays.get(media);
+        if (!entry) return;
+
+        if (!media.isConnected) {
+            entry.resizeObserver.disconnect();
+            if (entry.intersectionObserver) entry.intersectionObserver.disconnect();
+            container.remove();
+            if (this.activeEntry === entry) this.activeEntry = null;
             this.overlays.delete(media);
             return;
         }
 
         const platform = this._getPlatform();
         const hasModal = platform && platform.hasActiveModal ? platform.hasActiveModal() : false;
+
+        // Modal isolation check
         if (hasModal && platform && platform.isInsideModal && !platform.isInsideModal(media)) {
             container.style.display = 'none';
             container.style.visibility = 'hidden';
+            container.style.pointerEvents = 'none';
+            if (this.activeEntry === entry) this.activeEntry = null;
             return;
         }
 
-        if (this._isSectionDisabledByToggle()) {
+        // Per-section toggle check
+        if (this._isSectionDisabledByToggle(media)) {
             container.style.display = 'none';
             container.style.visibility = 'hidden';
+            container.style.pointerEvents = 'none';
+            if (this.activeEntry === entry) this.activeEntry = null;
             return;
         }
 
-        const rect = this._getVisibleClampedRect(media);
-
-        if (!rect || rect.width < 50 || rect.height < 50) {
+        // Section thumbnail/eligibility check
+        if (platform && platform.isThumbnail && platform.isThumbnail(media)) {
             container.style.display = 'none';
+            container.style.visibility = 'hidden';
+            container.style.pointerEvents = 'none';
+            if (this.activeEntry === entry) this.activeEntry = null;
             return;
         }
 
-        const config = this.getPlatformConfig(media);
-        const pad = config.padding !== undefined ? config.padding : 12;
-        const topOffset = config.topOffset || 0;
-        const bottomOffset = config.bottomOffset || 0;
+        const rect = media.getBoundingClientRect();
+        const style = window.getComputedStyle(media);
+        const isStyleHidden = style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none';
 
-        const overlayWidth = container.offsetWidth || 84;
-        const overlayHeight = container.offsetHeight || 34;
+        const inModal = platform && platform.isInsideModal ? platform.isInsideModal(media) : false;
+        const topNavHeight = inModal ? 0 : this._getTopNavHeight(media);
 
-        const corner = this.chooseCorner(media, rect, overlayWidth, overlayHeight);
-        const entry = this.overlays.get(media);
-        if (entry) entry.corner = corner;
-
-        let left;
-        let top;
-
-        switch (corner) {
-            case 'bottom-right':
-                left = rect.right - overlayWidth - pad;
-                top = rect.bottom - overlayHeight - pad - bottomOffset;
-                break;
-            case 'bottom-left':
-                left = rect.left + pad;
-                top = rect.bottom - overlayHeight - pad - bottomOffset;
-                break;
-            case 'top-left':
-                left = rect.left + pad;
-                top = rect.top + pad + topOffset;
-                break;
-            case 'top-right':
-            default:
-                left = rect.right - overlayWidth - pad;
-                top = rect.top + pad + topOffset;
-                break;
+        // If media has scrolled behind top navbar or off screen
+        if (rect.bottom <= topNavHeight + 8) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+            container.style.pointerEvents = 'none';
+            if (this.activeEntry === entry) this.activeEntry = null;
+            return;
         }
 
-        const section = platform && platform.getSection ? platform.getSection(media) : '';
-        if (section === 'wa-status') {
-            // HARD CLAMP FOR STATUS:
-            // Top must NEVER be inside the header (y < 90px) where Play/Pause/Mute reside
-            if (corner.startsWith('top')) {
-                top = Math.max(90, top);
-            } else {
-                top = Math.min(window.innerHeight - overlayHeight - 80, top);
-            }
-            // Clamp within viewport horizontally
-            left = Math.max(16, Math.min(left, window.innerWidth - overlayWidth - 16));
-        } else if (section === 'wa-media-viewer') {
-            if (corner === 'top-right') {
-                top = Math.max(72, top);
-            }
-            left = Math.max(rect.left + 2, Math.min(left, rect.right - overlayWidth - 2));
-            top = Math.max(rect.top + 2, Math.min(top, rect.bottom - overlayHeight - 2));
-        } else {
-            left = Math.max(rect.left + 2, Math.min(left, rect.right - overlayWidth - 2));
-            top = Math.max(rect.top + 2, Math.min(top, rect.bottom - overlayHeight - 2));
+        const vis = this._getVisibleRect(media);
+        if (vis.height < 45 || vis.width < 50) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+            container.style.pointerEvents = 'none';
+            if (this.activeEntry === entry) this.activeEntry = null;
+            return;
         }
 
-        container.style.left = `${left}px`;
-        container.style.top = `${top}px`;
+        if (rect.width === 0 || rect.height === 0 || !entry.isVisible || isStyleHidden || this._isClippedByAncestor(media)) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+            container.style.pointerEvents = 'none';
+            return;
+        }
+
+        const fullyAbove = rect.bottom < 0;
+        const fullyBelow = rect.top > window.innerHeight;
+        const fullyLeft = rect.right < 0;
+        const fullyRight = rect.left > window.innerWidth;
+
+        if (fullyAbove || fullyBelow || fullyLeft || fullyRight) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+            container.style.pointerEvents = 'none';
+            return;
+        }
+
+        container.style.display = 'flex';
+        if (this.activeEntry === entry) {
+            container.style.visibility = 'visible';
+            container.style.opacity = '1';
+            container.style.pointerEvents = 'auto';
+        }
+
+        // Lock corner on first placement so buttons never jump down across corners on scroll!
+        if (!entry.corner) {
+            entry.corner = this.pickBestCorner(media, rect, container);
+        }
+        this.applyCornerPosition(rect, container, entry.corner, media);
     }
 
     updateAllPositions() {
+        const platform = this._getPlatform();
+        const hasModal = platform && platform.hasActiveModal ? platform.hasActiveModal() : false;
+
+        // If an active modal is open and the activeEntry is outside the modal, instantly reset it
+        if (hasModal && this.activeEntry && platform && platform.isInsideModal && !platform.isInsideModal(this.activeEntry.hoverHost)) {
+            this._hide(this.activeEntry);
+            this.activeEntry = null;
+        }
+
         for (const [media, entry] of this.overlays.entries()) {
             this.updatePosition(media, entry.container);
         }

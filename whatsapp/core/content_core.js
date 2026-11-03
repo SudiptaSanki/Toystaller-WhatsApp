@@ -107,7 +107,7 @@ async function openMediaTab(url, isVideo = false) {
             const buffer = await blob.arrayBuffer();
 
             safeSendMessage({
-                action: 'createViewerTab',
+                action: 'createPlayerTab',
                 buffer: buffer,
                 mimeType: blob.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
                 isVideo: isVideo,
@@ -124,7 +124,7 @@ async function openMediaTab(url, isVideo = false) {
             downloadMediaBlob(url, isVideo);
         }
     } else {
-        safeSendMessage({ action: 'createViewerTab', url: url, isVideo: isVideo, filename: filename }, (response) => {
+        safeSendMessage({ action: 'createPlayerTab', url: url, isVideo: isVideo, filename: filename }, (response) => {
             if (!response || !response.success) {
                 safeSendMessage({ action: 'openInNewTab', url: url });
             }

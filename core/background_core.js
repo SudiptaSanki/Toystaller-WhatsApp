@@ -1,5 +1,5 @@
-// core/background_core.js
-// Toystaller: WhatsApp Edition — Shared background script logic.
+// background_script.js
+// Toystaller v1.0 (WhatsApp Edition) — Media interception, download dispatcher, and in-browser player routing.
 
 const interceptedMedia = {};
 const viewerMediaCache = new Map();
@@ -30,7 +30,7 @@ chrome.webRequest.onResponseStarted.addListener(
             }
         }
     },
-    { urls: ["*://web.whatsapp.com/*", "*://*.whatsapp.net/*"] }
+    { urls: ["*://web.whatsapp.com/*", "*://*.whatsapp.net/*", "*://*.whatsapp.com/*"] }
 );
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -43,7 +43,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'downloadMedia') {
         const downloadOptions = {
             url: request.url,
-            saveAs: false
+            saveAs: request.saveAs !== undefined ? request.saveAs : true
         };
         if (request.filename) {
             downloadOptions.filename = request.filename;
@@ -58,8 +58,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
         });
         return true;
-    } else if (request.action === 'createViewerTab') {
-        const id = 'viewer_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    } else if (request.action === 'createPlayerTab' || request.action === 'createViewerTab') {
+        const id = 'player_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
         viewerMediaCache.set(id, {
             buffer: request.buffer,
             mimeType: request.mimeType,
@@ -75,16 +75,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
         }, 60000);
 
-        chrome.tabs.create({ url: chrome.runtime.getURL(`viewer.html?id=${id}`) }, (tab) => {
+        chrome.tabs.create({ url: chrome.runtime.getURL(`player.html?id=${id}`) }, (tab) => {
             if (chrome.runtime.lastError) {
-                console.error("Toystaller: Failed to create viewer tab:", chrome.runtime.lastError.message);
+                console.error("Toystaller: Failed to create player tab:", chrome.runtime.lastError.message);
                 sendResponse({ success: false, error: chrome.runtime.lastError.message });
             } else {
                 sendResponse({ success: true, id: id, tabId: tab ? tab.id : null });
             }
         });
         return true;
-    } else if (request.action === 'getViewerMedia') {
+    } else if (request.action === 'getPlayerMedia' || request.action === 'getViewerMedia') {
         const id = request.id;
         const media = viewerMediaCache.get(id);
         if (media) {
@@ -95,14 +95,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         return true;
     } else if (request.action === 'openInNewTab') {
-        try {
-            chrome.tabs.create({ url: request.url }, () => {
-                if (chrome.runtime.lastError) {
-                    console.warn("Toystaller: Could not open tab directly:", chrome.runtime.lastError.message);
-                }
-            });
-        } catch (e) {
-            console.warn("Toystaller: Could not open tab:", e);
+        const url = request.url || '';
+        const lowerUrl = url.toLowerCase();
+        const isVideo = request.isVideo || 
+                        lowerUrl.includes('.mp4') || 
+                        lowerUrl.includes('.m4v') || 
+                        lowerUrl.includes('.webm') || 
+                        lowerUrl.includes('/video/') || 
+                        lowerUrl.includes('mime=video');
+
+        if (isVideo) {
+            const playerUrl = chrome.runtime.getURL('player.html') + '?url=' + encodeURIComponent(url);
+            chrome.tabs.create({ url: playerUrl });
+        } else {
+            chrome.tabs.create({ url: url });
         }
         sendResponse({ success: true });
     }

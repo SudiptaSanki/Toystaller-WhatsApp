@@ -1,57 +1,108 @@
-# 🧸 Toystaller: WhatsApp Edition (v6.0)
+<div align="center">
 
-**High-Performance Media Downloader & Viewer for WhatsApp Web**
+# 🧸 Toystaller: WhatsApp Edition (v1.0)
 
-[![Manifest V3](https://img.shields.io/badge/Manifest-V3-brightgreen)](https://developer.chrome.com/docs/extensions/mv3/intro/)
+**High-Performance, Stealth Media Downloader & Media Viewer for WhatsApp Web**
+
+[![Manifest V3](https://img.shields.io/badge/Manifest-V3-brightgreen.svg)](https://developer.chrome.com/docs/extensions/mv3/intro/)
 [![Target](https://img.shields.io/badge/Target-WhatsApp_Web-25D366?logo=whatsapp&logoColor=white)](https://web.whatsapp.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/Version-6.0-blue)](https://github.com/SudiptaSanki/Toystaller-WhatsApp)
+[![Global Repo](https://img.shields.io/badge/Main%20Project-Toystaller%20Global-blue)](https://github.com/SudiptaSanki/Toystaller)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Technical Guide](https://img.shields.io/badge/Deep%20Docs-DETAILS.md-purple)](DETAILS.md)
 
-> *A specialized Chromium extension that extracts and downloads original decrypted images, videos, and status updates directly from WhatsApp Web without third-party services or quality loss.*
+*A specialized, 100% client-side Chromium extension that extracts original decrypted high-resolution images, videos, and status updates directly from WhatsApp Web without third-party services, compression, or quality loss.*
 
 ---
 
-## 📌 Repository Links
-
+### 🌐 Official Repositories & Documentation
 * **WhatsApp Specialized Edition:** [https://github.com/SudiptaSanki/Toystaller-WhatsApp](https://github.com/SudiptaSanki/Toystaller-WhatsApp)
+* **Facebook Specialized Edition:** [https://github.com/SudiptaSanki/Toystaller-Facebook](https://github.com/SudiptaSanki/Toystaller-Facebook)
 * **Instagram Specialized Edition:** [https://github.com/SudiptaSanki/Toystaller-Instagram](https://github.com/SudiptaSanki/Toystaller-Instagram)
-* **Global Multi-Platform Suite:** [https://github.com/SudiptaSanki/Toystaller](https://github.com/SudiptaSanki/Toystaller)
+* **Main Global Multi-Platform Suite:** [https://github.com/SudiptaSanki/Toystaller](https://github.com/SudiptaSanki/Toystaller) *(WhatsApp, Facebook, Instagram, LinkedIn)*
+* **Deep Technical Specification & Architecture:** [`DETAILS.md`](DETAILS.md)
+
+</div>
 
 ---
 
-## 🌟 Overview
+## 🚀 Overview
 
-**Toystaller: WhatsApp Edition** is engineered specifically for WhatsApp Web's single-page architecture (`web.whatsapp.com`). 
+**Toystaller: WhatsApp Edition** is a dedicated browser extension engineered specifically for WhatsApp Web (`web.whatsapp.com`). WhatsApp Web uses client-side decryption where media attachments are rendered as in-memory `blob:` streams inside dynamic virtualized scroll views, message bubbles, status/story viewers, and media lightbox overlays.
 
-WhatsApp Web decrypts incoming media in-browser into local `blob:` objects. Standard browser download extensions fail on WhatsApp Web because external background processes cannot cross origin boundaries to access decrypted blob streams.
-
-Toystaller operates **100% client-side** inside WhatsApp Web's page context. It identifies decrypted media objects, provides instant download buttons, and triggers direct file downloads with clean, timestamped filenames.
+Traditional downloaders cannot capture WhatsApp media because the files are decrypted locally within the browser session. Toystaller operates **100% client-side** inside your browser with **zero external backend server dependencies** (no local yt-dlp or ffmpeg server required). It directly hooks into WhatsApp Web's media buffers and network streams to download original decrypted MP4 videos and full-resolution images, or stream them inside a dedicated in-browser HTML5 player.
 
 ---
 
-## ⚡ Supported WhatsApp Web Sections
+## ⚡ Features & Section Support
 
-| WhatsApp Section | Supported Media | Download Action | Placement & Isolation |
+| WhatsApp Section | Supported Media | Extraction Capability | UI & Behavior |
 | :--- | :--- | :--- | :--- |
-| **Chat Conversation (`wa-chat`)** | Received & Sent Photos, Videos | Direct 1-Click Download (`.jpg`, `.mp4`) + Open in New Tab | Clamped corner button inside message bubble with smart hover |
-| **Status Viewer (`wa-status`)** | Fullscreen Status / Story Updates | Download full status video or photo | Non-intrusive placement avoiding progress bars; prevents story skipping |
-| **Media Lightbox (`wa-media-viewer`)** | Fullscreen Opened Photos & Videos | Download maximum-resolution media | Strict modal isolation; avoids WhatsApp's close/forward toolbar |
-| **Contact / Group Info (`wa-profile`)** | Profile Avatars & Shared Media Grid | Download profile pictures and gallery media | Non-intrusive hover buttons on media gallery items |
+| **Status Updates (`wa-status`)** | Fullscreen Status / Story Updates | Full status video or photo in original quality | **Safe Placement & Header Clearance**: Positioned at `y >= 90px` completely clear of native Play/Pause and Mute controls; avoids story skipping |
+| **Chat Media (`wa-chat`)** | Conversation Message Stream (Photos & Videos) | Client-decrypted original master MP4, unscaled full-res JPEG | **Zero-Leak & Corner-Locked**: Permanently locked corners that never jump on scroll; auto-hides when scrolling behind chat header |
+| **Media Lightbox (`wa-media-viewer`)** | Fullscreen Dialog Photos & Videos (`[role="dialog"]`) | Maximum available resolution photo, full-length video stream | **Zero-Bleed Modal Isolation**: Instantly suppresses background message overlays; clears top-right close/forward/star buttons |
+| **Contact & Info (`wa-profile`)** | Contact & Group Drawer Media Grid, Avatars | Uncompressed profile photo, media tile downloads | Clean overlay buttons on contact info and media gallery tiles |
 
 ---
 
+## 🎬 Anti-Redirect In-Browser HTML5 Player (The CDN 302 Bypass Trick)
+
+### The Problem
+When raw media CDN links are opened directly in a new browser tab (`chrome.tabs.create({ url: cdnUrl })`), the browser initiates a top-level document navigation:
+```http
+GET /video.mp4 HTTP/1.1
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+```
+Platform CDNs (`*.whatsapp.net`, `*.fbcdn.net`) reject top-level document requests to prevent unauthorized hotlinking, returning **HTTP 302 Redirects** back to the login page or failing navigation.
+
+### The Solution (100% Client-Side)
+Instead of opening raw links directly, Toystaller routes video playback through a built-in dark-themed player page:
+`chrome.runtime.getURL('player.html') + '?url=' + encodeURIComponent(videoUrl)`
+
+1. **How the Bypass Works**:
+   - `player.html` loads the media inside a native HTML `<video id="videoPlayer" controls autoplay playsinline>` element.
+   - Because the request originates from an HTML `<video>` element, Chromium sends:
+     ```http
+     Sec-Fetch-Dest: video
+     Sec-Fetch-Mode: no-cors
+     ```
+   - In combination with `rules.json` (`declarativeNetRequest`) injecting the official `Referer: https://web.whatsapp.com/` and `Origin: https://web.whatsapp.com` headers, the platform's CDN considers this a genuine embedded playback request and returns **HTTP 200 / 206 Partial Content**.
+   - **For client-decrypted `blob:` streams**: The content script reads the in-memory decrypted buffer, transfers it to the background service worker, and loads it into `player.html` via in-origin `URL.createObjectURL(blob)`, completely bypassing Chromium's top-frame blob navigation block and WhatsApp's COOP headers.
+2. **Player Features**:
+   - Modern, responsive dark-mode video player (`#0b141a` WhatsApp theme).
+   - Top action bar featuring:
+     - **"Download Video"** button calling `chrome.downloads.download({ url: videoUrl, filename: ..., saveAs: true })`.
+     - **"Copy Link"** button for easy sharing.
+     - Video resolution & format badge (e.g., `1080 x 1920 • HD MP4`).
+   - Keyboard shortcuts: <kbd>Space</kbd> Play/Pause, <kbd>M</kbd> Mute, <kbd>F</kbd> Fullscreen, <kbd>D</kbd> Download, <kbd>←</kbd> / <kbd>→</kbd> Seek 5s.
+
+---
+
+## 🔒 Overlay Stability & Corner-Locking Engine
+
+1. **Permanently Locked Corners**:
+   - Once a corner (e.g., `top-right`) is selected for a media element via `pickBestCorner`, it is **permanently locked**.
+   - As you scroll through long chat histories, buttons **never jump down to `bottom-right` or switch corners**.
+2. **Clean Disappearance on Scroll Behind Headers**:
+   - When a media element scrolls under the sticky chat conversation header (`#main header`, `top < topNavHeight + 4`), the overlay **cleanly hides** (`display: 'none'; visibility: 'hidden';`).
+   - Buttons never slide along the navbar or float on top of header controls.
+   - When scrolled back into view, the overlay reappears in its exact locked spot.
+3. **Smart Filtering**:
+   - Automatically excludes circular avatars in the left chat list (`#pane-side`), message reaction icons, emoji pickers, voice note waveforms, and small sticker previews.
+
+---
 
 ## 🛠️ Technology Stack & Architecture
 
-Toystaller is built from the ground up with **Pure Modern Vanilla JavaScript** (ES2022+), zero third-party dependencies, and adheres strictly to **Google Chrome Manifest V3 specifications**.
+Toystaller is built with **Pure Modern Vanilla JavaScript** (ES2022+), zero third-party dependencies, and adheres strictly to **Google Chrome Manifest V3 specifications**.
 
 ```mermaid
 flowchart TD
     subgraph Browser Context
         subgraph MAIN World Page Context
-            P[Instagram React App] -->|React Tree| RF[React Fiber Extractors]
-            N[Fetch / XHR Traffic] -->|Intercept GraphQL & CDN| PI[page_interceptor.js]
-            RF -->|window.postMessage| CS
+            W[WhatsApp Web Application] -->|Decrypted Media Blobs| DM[DOM Video & Img Elements]
+            N[Network Requests] -->|Intercept Attachment URLs| PI[page_interceptor.js]
+            DM -->|DOM Mutation Events| CS
             PI -->|toystaller_video_urls| CS
         end
 
@@ -63,162 +114,121 @@ flowchart TD
 
         subgraph Service Worker Background
             BG -->|Bypass CDN Referer Checks| DNR[declarativeNetRequest rules.json]
+            BG -->|Direct MP4 Streaming & Decrypted Playback| PL[player.html & player.js]
             BG -->|Native Browser Download| DL[chrome.downloads API]
             BG -->|Direct Tab Open| TABS[chrome.tabs API]
         end
     end
 ```
 
-### Core Technologies:
-1. **Manifest V3 Service Worker (`background_script.js`)**:
-   - Manages asynchronous download pipelines via `chrome.downloads`.
-   - Intercepts raw network response headers with `chrome.webRequest` for fallback URL tracking.
-2. **Declarative Net Request Header Rewriting (`rules.json`)**:
-   - Instagram CDN (`*.cdninstagram.com`) blocks media downloads with `403 Forbidden` if loaded with external referrers. Toystaller uses `declarativeNetRequest` rules to spoof proper Instagram headers on the fly.
-3. **Main-World React Fiber Hooking (`page_interceptor.js`)**:
-   - Seamlessly accesses DOM elements' hidden `__reactFiber$` and `__reactProps$` internal keys.
-   - Extracts complete `video_versions` (highest bitrate/height) and `image_versions2.candidates` (uncompressed resolution) directly from React's component state.
-4. **Network Interceptor (`page_interceptor.js`)**:
-   - Overrides `window.fetch` and `window.XMLHttpRequest` in the page context.
-   - Captures Instagram GraphQL and media query responses in memory before they are decoded.
-5. **Geometry & Occlusion Engine (`overlay_manager.js`)**:
-   - Uses `IntersectionObserver`, `ResizeObserver`, and `document.elementsFromPoint` hit testing.
-   - Dynamically calculates best corner placement avoiding native Instagram controls (Like, Comment, Mute, Close).
-   - Real-time `MutationObserver` on modal dialogs to prevent overlay bleed across layers.
-6. **Isolated Settings Dashboard (Shadow DOM)**:
-   - Floating dark-mode control center rendered inside an isolated `ShadowRoot` to prevent any CSS interference from Instagram's stylesheets.
-
-*(For exhaustive architectural diagrams and algorithms, read [`DETAILS.md`](DETAILS.md)).*
-
 ---
 
-## Detailed Installation Guide (Step-by-Step)
+## 📦 Installation Guide (Chromium Browsers)
 
-To install and run **Toystaller: Instagram Edition** on any Chromium-based browser (Google Chrome, Brave, Microsoft Edge, Opera, Vivaldi, Arc):
+Supported on **Google Chrome**, **Brave**, **Microsoft Edge**, **Opera**, **Vivaldi**, and all Chromium-based browsers.
 
-### Prerequisites
-- Any modern Chromium browser (Chrome 102+ recommended).
-- Git installed on your machine (or download the source ZIP).
-
----
-
-### Step 1: Clone or Download the Repository
-Run the following command in your terminal:
+### Step 1: Download or Clone the Repository
 ```bash
-git clone https://github.com/SudiptaSanki/Toystaller-Instagram.git
+git clone https://github.com/SudiptaSanki/Toystaller-WhatsApp.git
 ```
-*Or click **Code ➔ Download ZIP** on GitHub and extract the folder to your preferred directory.*
+*(Or download the ZIP archive from GitHub and extract it to a folder on your computer).*
 
----
-
-### Step 2: Open Browser Extensions Page
-1. Open your Chromium browser.
-2. In the URL address bar, enter the corresponding URL:
-   - **Google Chrome**: `chrome://extensions/`
-   - **Brave Browser**: `brave://extensions/`
-   - **Microsoft Edge**: `edge://extensions/`
-   - **Opera**: `opera://extensions/`
-
----
+### Step 2: Open Extensions in Your Browser
+- **Chrome / Brave:** Navigate to `chrome://extensions/`
+- **Microsoft Edge:** Navigate to `edge://extensions/`
+- **Opera:** Navigate to `opera://extensions/`
 
 ### Step 3: Enable Developer Mode
-Look in the top-right corner of the Extensions page and toggle the switch labeled **Developer mode** to **ON**.
+- In the top-right corner of the Extensions page, toggle the **Developer mode** switch to **ON**.
 
-```
-                                  [ web.whatsapp.com ]
-                                            │
-                                            ▼
-                           [ Signal Decryption / WA Web Core ]
-                                            │
-                        ┌───────────────────┴───────────────────┐
-                        ▼                                       ▼
-             [ Decrypted Image Blob ]                [ Decrypted Video Blob ]
-                        │                                       │
-                        └───────────────────┬───────────────────┘
-                                            │
-                                            ▼
-                                [ Toystaller Content Core ]
-                                 ├── platforms/whatsapp.js
-                                 ├── overlay_manager.js
-                                 └── core/content_core.js
-                                            │
-                        ┌───────────────────┴───────────────────┐
-                        ▼                                       ▼
-             [ 🟢 Download Button ]                  [ 🔵 Open in New Tab ]
-           Triggers instant file download            Opens media in clean viewer
-           (whatsapp_image_...jpg / .mp4)
-```
+### Step 4: Load Unpacked Extension
+1. Click the **Load unpacked** button in the top-left corner.
+2. Select the repository root folder `Toystaller-WhatsApp/`
+   *(Or select the self-contained `whatsapp/` package subdirectory; both contain valid extension configurations).*
+3. Click **Select Folder**.
 
-### Key Engineering Features
-1. **In-Page Blob Downloader**: Fetches client-side decrypted blob streams directly within the page context and saves them to your local downloads folder.
-2. **Strict Modal Isolation**: When you open a Status update or click an image to view it in full size, background chat buttons are immediately suppressed to avoid visual noise.
-3. **Event Propagation Shielding**: Prevents clicks on download buttons from bubbling up to WhatsApp's click listeners, ensuring statuses do not accidentally advance or close.
-4. **Customizable Section Toggles**: Use the popup menu to selectively enable or disable overlays for Chat Media, Status Updates, Lightbox Viewer, or Profile Info.
+### Step 5: Pin and Verify
+1. Click the **Puzzle icon** (Extensions menu) in your browser toolbar.
+2. Locate **Toystaller: WhatsApp Edition** and click the **Pin icon** to pin it to your toolbar.
+3. Open [WhatsApp Web](https://web.whatsapp.com/) or refresh your existing tab.
+4. Hover over any chat photo/video, status story, or lightbox image — you will see the **Green (Download)** and **Blue (Open in Player)** overlay buttons!
 
 ---
 
-## 🚀 Installation Guide
+## 🎯 How to Use
 
-### Option A: Load Unpacked (Development)
-1. Clone or download this repository:
-   ```bash
-   git clone https://github.com/SudiptaSanki/Toystaller-WhatsApp.git
-   ```
-2. Open Google Chrome (or any Chromium browser like Brave, Edge, Opera, Arc) and navigate to:
-   ```
-   chrome://extensions/
-   ```
-3. Enable **Developer mode** in the top-right corner.
-4. Click **Load unpacked** in the top-left corner.
-5. Select the project directory (`Toystaller-WhatsApp` or `Version 6/whatsapp`).
-6. Open [WhatsApp Web](https://web.whatsapp.com/) and enjoy seamless media downloading!
+1. **Download / Play Video in Full HD**:
+   - Hover over any chat video or status update.
+   - Click the **Blue Button** to open the video in the built-in Toystaller player tab.
+   - Click **Download Video** in the player header to save the `.mp4` file directly.
+2. **Download High-Resolution Image**:
+   - Hover over any photo in a chat conversation, status update, or media lightbox.
+   - Click the **Green Button** for instant, one-click direct download with custom timestamped filenames (`WhatsApp_Image_...jpg`).
+3. **Status Story Downloads**:
+   - View any WhatsApp Status update. Action buttons appear non-intrusively in the top-right of the video/photo, safely below the status header.
+   - Click to download or stream without interrupting story playback.
+4. **Customize Section Overlays**:
+   - Click the Toystaller icon in your browser toolbar to toggle overlays on/off for specific sections:
+     - **Show on Chat Media**
+     - **Show on Status Updates**
+     - **Show on Media Lightbox**
+     - **Show on Contact & Info**
 
 ---
 
 ## 📂 Project Structure
 
-```
+```text
 Toystaller-WhatsApp/
-├── manifest.json              # Extension Manifest V3 (Toystaller: WhatsApp Edition)
-├── background_script.js       # Background service worker
-├── content_script.js          # Content script entry point
-├── overlay_manager.js         # Modal-aware floating button positioning engine
-├── popup.html                 # Popup settings dashboard
-├── popup.js                   # Settings state manager
+├── manifest.json            # Extension manifest (MV3, permissions, content scripts)
+├── background_script.js     # Background Service Worker for downloads & player routing
+├── content_script.js        # Content script orchestrator & button injection
+├── overlay_manager.js       # Smart DOM positioning, corner-locking & modal isolation
+├── page_interceptor.js      # Main-world Fetch/XHR interceptor & media reader
+├── player.html              # Dedicated ad-free HTML5 video player page
+├── player.js                # Player controller (playback, direct download, copy link)
+├── rules.json               # DeclarativeNetRequest header rules for *.whatsapp.net
+├── popup.html               # Popup settings panel UI (v1.0 Specialized Edition)
+├── popup.js                 # Popup settings logic & tab synchronization
+├── Toystaller_logo.png      # Extension branding & icon assets
 ├── platforms/
-│   └── whatsapp.js            # WhatsApp section classifier and media filter
-├── core/
-│   ├── background_core.js     # Shared background logic
-│   ├── content_core.js        # Media extraction and direct blob downloader
-│   ├── interceptor_core.js    # In-page network interceptor
-│   └── overlay_manager.js     # Overlay manager core
-└── Version 6/
-    ├── instagram/             # Preserved Instagram Edition (user-managed)
-    └── whatsapp/              # Version 6 standalone modular WhatsApp Edition
-        ├── manifest.json
-        ├── background.js
-        ├── content.js
-        ├── platform.js
-        ├── popup.html
-        ├── popup.js
-        ├── icon.png
-        └── core/
-            ├── background_core.js
-            ├── content_core.js
-            ├── interceptor_core.js
-            └── overlay_manager.js
+│   └── whatsapp.js          # Dedicated WhatsApp section detector & quality extractors
+├── core/                    # Shared modular core architecture
+│   ├── background_core.js
+│   ├── content_core.js
+│   ├── interceptor_core.js
+│   └── overlay_manager.js
+├── whatsapp/                # Self-contained standalone WhatsApp Edition package
+│   ├── manifest.json
+│   ├── background.js
+│   ├── content.js
+│   ├── platform.js
+│   ├── player.html
+│   ├── player.js
+│   ├── rules.json
+│   ├── popup.html
+│   ├── popup.js
+│   ├── icon.png
+│   └── core/
+├── DETAILS.md               # Exhaustive technical documentation & architecture guide
+├── CONTRIBUTING.md          # Technical contributor guide
+├── LICENSE                  # MIT License
+└── README.md                # Project documentation & installation manual
 ```
 
 ---
 
-## 🔒 Privacy & Security
+## 🛡️ Privacy & Security
 
-* **Zero External Calls**: All media extraction and downloads occur entirely on your local machine within `web.whatsapp.com`.
-* **Zero Telemetry**: No analytics, telemetry, or user tracking.
-* **Open Source**: Complete transparency under the MIT License.
+- **100% Client-Side**: No user messages, chats, contacts, cookies, or media tokens are ever transmitted to external servers.
+- **Zero Third-Party Trackers**: No analytics, telemetry, or external dependencies.
+- **No Risk of Account Bans**: Operates purely within your standard browser session without unauthorized scraping or suspicious API calls.
+- **Direct Decrypted Streams**: Media files are extracted directly from your browser's local decrypted WhatsApp session.
 
 ---
 
-## 📄 License
+## 🤝 Contributing & License
 
-MIT © [Sudipta Sanki](https://github.com/SudiptaSanki)
+Contributions are welcome! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`DETAILS.md`](DETAILS.md) for details on code style, architecture, and pull request workflows.
+
+Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.

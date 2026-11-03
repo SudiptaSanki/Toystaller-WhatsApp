@@ -3,7 +3,7 @@ window.ToystallerPlatforms = window.ToystallerPlatforms || {};
 (function() {
     const whatsappPlatform = {
         name: 'whatsapp',
-        version: 'v6.0',
+        version: 'v1.0',
         specialization: 'WhatsApp Web media extraction — Chats, Status, and Media Lightbox.',
 
         // --- Route & Section Detection ---

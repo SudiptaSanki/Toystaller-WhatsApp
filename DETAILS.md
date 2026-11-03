@@ -1,265 +1,159 @@
 # 📘 Toystaller Technical Specification & Deep Architecture Guide
 
 > **Main Global Multi-Platform Repository:** [https://github.com/SudiptaSanki/Toystaller](https://github.com/SudiptaSanki/Toystaller)  
-> **Instagram Specialized Repository:** [https://github.com/SudiptaSanki/Toystaller-Instagram](https://github.com/SudiptaSanki/Toystaller-Instagram)  
-> **Version:** 6.0 (Specialized Edition)  
+> **WhatsApp Specialized Repository:** [https://github.com/SudiptaSanki/Toystaller-WhatsApp](https://github.com/SudiptaSanki/Toystaller-WhatsApp)  
+> **Version:** 1.0 (Specialized Edition)  
 > **Specification Target:** Chromium Manifest V3
 
 ---
 
 ## 📑 Table of Contents
 1. [Executive Summary & Motivation](#1-executive-summary--motivation)
-2. [Why Standard Media Downloaders Fail on Instagram](#2-why-standard-media-downloaders-fail-on-instagram)
+2. [Why Standard Media Downloaders Fail on WhatsApp Web](#2-why-standard-media-downloaders-fail-on-whatsapp-web)
 3. [System Architecture Overview](#3-system-architecture-overview)
 4. [Component Deep Dive](#4-component-deep-dive)
-   - [4.1 Main World Execution & Page Interceptor](#41-main-world-execution--page-interceptor)
-   - [4.2 React Fiber State Inspection Engine](#42-react-fiber-state-inspection-engine)
-   - [4.3 Dynamic Network Interception Pipeline](#43-dynamic-network-interception-pipeline)
-   - [4.4 Content Script & Cross-World Messaging](#44-content-script--cross-world-messaging)
-   - [4.5 Overlay Manager & Collision Resolution Engine](#45-overlay-manager--collision-resolution-engine)
-   - [4.6 Modal Isolation & Zero-Bleed Backdrop Engine](#46-modal-isolation--zero-bleed-backdrop-engine)
-   - [4.7 DeclarativeNetRequest & Referer Header Spoofing](#47-declarativeNetRequest--referer-header-spoofing)
-   - [4.8 Background Service Worker & Download Pipeline](#48-background-service-worker--download-pipeline)
-5. [Instagram Section-by-Section Handler Matrix](#5-instagram-section-by-section-handler-matrix)
+   - [4.1 Client-Side Decrypted Blob Extraction](#41-client-side-decrypted-blob-extraction)
+   - [4.2 The Anti-Redirect In-Browser HTML5 Player (CDN 302 Bypass)](#42-the-anti-redirect-in-browser-html5-player-cdn-302-bypass)
+   - [4.3 Overlay Manager & Permanently Locked Corner Engine](#43-overlay-manager--permanently-locked-corner-engine)
+   - [4.4 Sticky Header Clearance & Scroll Disappearance](#44-sticky-header-clearance--scroll-disappearance)
+   - [4.5 DeclarativeNetRequest & Referer Header Pipeline](#45-declarativenetrequest--referer-header-pipeline)
+   - [4.6 Background Service Worker & Memory Buffer Transfer](#46-background-service-worker--memory-buffer-transfer)
+5. [WhatsApp Section-by-Section Handler Matrix](#5-whatsapp-section-by-section-handler-matrix)
 6. [Performance, Memory & Lifecycle Optimization](#6-performance-memory--lifecycle-optimization)
 7. [Security, Sandboxing & Privacy Guarantees](#7-security-sandboxing--privacy-guarantees)
-8. [Comparison with Alternative Approaches](#8-comparison-with-alternative-approaches)
-9. [Global Multi-Platform Ecosystem](#9-global-multi-platform-ecosystem)
+8. [Global Multi-Platform Ecosystem](#8-global-multi-platform-ecosystem)
 
 ---
 
 ## 1. Executive Summary & Motivation
 
-**Toystaller** was created to solve a fundamental problem in the modern web: **access to original, uncompressed user media**. Social media networks such as Instagram employ sophisticated client-side rendering engines (React), dynamic adaptive streaming (DASH/HLS), and segmented blob streams (`blob:https://...`) to obscure direct media sources.
+**Toystaller: WhatsApp Edition** is engineered to provide seamless, one-click access to original-quality media on WhatsApp Web (`web.whatsapp.com`). WhatsApp Web decrypts media client-side in the browser, storing assets as transient `blob:` URLs within dynamic virtualized lists, status update viewers, message bubbles, and lightbox dialogs.
 
-Traditional approaches either:
-1. Require users to copy URLs and paste them into third-party websites loaded with advertisements, trackers, and aggressive rate limits.
-2. Rely on scraping public video tags from the DOM, which only exposes low-bitrate, heavily compressed video segments or thumbnail covers.
-3. Query external server-side APIs that frequently break whenever Instagram updates its internal GraphQL schemas.
+Traditional media scrapers fail because:
+1. Media files are encrypted in transit and only decrypted locally within the authenticated user session.
+2. Standard download tools attempting to navigate to `blob:` URLs directly are blocked by Chromium's top-frame blob navigation policy and WhatsApp's strict `Cross-Origin-Opener-Policy: same-origin` (COOP).
+3. Raw CDN links to `*.whatsapp.net` reject external GET requests with HTTP 302 Redirects back to WhatsApp Web.
 
-**Toystaller operates entirely within the client's browser**, non-destructively reading memory states and network buffers that the official Instagram web client has already authenticated and decrypted.
+**Toystaller operates 100% client-side** inside the browser, intercepting decrypted buffers in-page and routing playback through a dedicated in-browser HTML5 player tab (`player.html`).
 
 ---
 
-## 2. Why Standard Media Downloaders Fail on Instagram
+## 2. Why Standard Media Downloaders Fail on WhatsApp Web
 
-Instagram's web client implements multiple anti-scraping and optimization layers:
-
+```text
+[WhatsApp Web Client]
+   ├── 1. Client-Side Decryption: Media streams arrive as encrypted ciphertext chunks.
+   │      WhatsApp Web decrypts them in-memory and creates transient blob URLs.
+   ├── 2. Top-Frame Blob Navigation Restriction: Chromium blocks top-level document
+   │      navigation to blob: URLs (Not allowed to navigate top frame to blob URL).
+   ├── 3. Strict COOP / CSP: Cross-Origin-Opener-Policy: same-origin prevents window.open
+   │      and iframe scripting from external or isolated frames.
+   ├── 4. Virtualized Scroll Containers: Chat messages are virtualized, continuously
+   │      creating, recycling, and destroying DOM media nodes on scroll.
+   └── 5. CDN Referer Validation: Direct requests to *.whatsapp.net or *.fbcdn.net
+          without genuine Referer headers trigger HTTP 302 redirects.
 ```
-[User Browser]
-   ├── 1. Blob URLs: <video src="blob:https://instagram.com/xyz...">
-   │      └── Direct download returns 0-byte or corrupted stream.
-   ├── 2. DASH Segmentation: Video and audio streams are split into tiny chunks.
-   ├── 3. Custom DOM Overlay Layers: Transparent divs layer over <video>,
-   │      intercepting all right-click and context menu events.
-   ├── 4. Referer Verification on CDN: Requests to cdninstagram.com lacking
-   │      an official Referer header trigger HTTP 403 Forbidden.
-   └── 5. Single-Page Navigation (SPA): Posts opened from profile grids render
-          as modals without a full page reload, leaving background media active.
-```
-
-Toystaller bypasses all five barriers directly at the browser runtime level without modifying Instagram's original DOM or triggering anti-bot heuristics.
 
 ---
 
 ## 3. System Architecture Overview
 
-```
-+-----------------------------------------------------------------------------------+
-| CHROMIUM BROWSER RUNTIME                                                          |
-|                                                                                   |
-|  +-----------------------------------------------------------------------------+  |
-|  | MAIN WORLD (Page Context - window)                                         |  |
-|  |                                                                             |  |
-|  |   [ Instagram React Application ]                                          |  |
-|  |      │                                                                      |  |
-|  |      ├─── React Fiber Tree (__reactFiber$, __reactProps$)                   |  |
-|  |      │       ▲                                                              |  |
-|  |      │       │ [Deep Object Traversal Engine]                               |  |
-|  |      │   [ page_interceptor.js ]                                            |  |
-|  |      │       ▲                                                              |  |
-|  |      └─── Network Hooks (window.fetch, window.XMLHttpRequest)               |  |
-|  |              │                                                              |  |
-|  |              ▼ window.postMessage                                           |  |
-|  +--------------┼--------------------------------------------------------------+  |
-|                 │                                                                 |
-|  +--------------┼--------------------------------------------------------------+  |
-|  | ISOLATED CONTENT SCRIPT WORLD                                               |  |
-|  |              ▼                                                              |  |
-|  |   [ content_script.js ] ◄───► [ platforms/instagram.js ]                    |  |
-|  |          │                                                                  |  |
-|  |          ▼                                                                  |  |
-|  |   [ overlay_manager.js ]                                                     |  |
-|  |      ├── MutationObserver (Modal Dialog Detection)                          |  |
-|  |      ├── IntersectionObserver (Media Viewport Tracking)                     |  |
-|  |      ├── ResizeObserver (Dynamic Element Relocation)                        |  |
-|  |      └── elementsFromPoint (Occlusion & Hover Hit Testing)                  |  |
-|  |              │                                                              |  |
-|  |              ▼ chrome.runtime.sendMessage                                   |  |
-|  +--------------┼--------------------------------------------------------------+  |
-|                 │                                                                 |
-|  +--------------┼--------------------------------------------------------------+  |
-|  | BACKGROUND SERVICE WORKER                                                   |  |
-|  |              ▼                                                              |  |
-|  |   [ background_script.js ]                                                  |  |
-|  |      ├── chrome.downloads.download() ───► [ Local File System ]             |  |
-|  |      ├── chrome.tabs.create()         ───► [ HD Media New Tab ]             |  |
-|  |      └── declarativeNetRequest        ───► [ rules.json Referer Rewrite ]   |  |
-|  +-----------------------------------------------------------------------------+  |
-+-----------------------------------------------------------------------------------+
+```mermaid
+flowchart TD
+    subgraph Browser Context
+        subgraph MAIN World Page Context
+            W[WhatsApp Web Application] -->|Client-Decrypted Blobs| DOM[DOM Video & Img Elements]
+            N[Network Attachment Requests] -->|Intercept Attachment URLs| PI[page_interceptor.js]
+            DOM -->|MutationObserver / Hover| CS
+            PI -->|toystaller_video_urls| CS
+        end
+
+        subgraph Content Script Isolated World
+            CS[content_script.js] -->|Injects & Coordinates| OM[overlay_manager.js]
+            OM -->|ResizeObserver / IntersectionObserver| OV[Safe DOM Overlay Buttons]
+            CS -->|ArrayBuffer Transfer / Action Dispatch| BG[background_script.js]
+        end
+
+        subgraph Service Worker Background
+            BG -->|Bypass CDN Referer Checks| DNR[declarativeNetRequest rules.json]
+            BG -->|In-Browser HTML5 Player Tab| PL[player.html & player.js]
+            BG -->|Native Browser Download| DL[chrome.downloads API]
+            BG -->|Tab Creation| TABS[chrome.tabs API]
+        end
+    end
 ```
 
 ---
 
 ## 4. Component Deep Dive
 
-### 4.1 Main World Execution & Page Interceptor
-Chrome extension content scripts run by default in an **Isolated World**. While this protects DOM integrity, it hides the page's actual JavaScript variables, React Fiber tree, and prototype chains (`window.fetch`, `window.XMLHttpRequest`).
+### 4.1 Client-Side Decrypted Blob Extraction
+In `core/content_core.js`, Toystaller hooks directly into decrypted media elements:
+- Images: Extracts the highest-resolution candidate from `srcset` or `currentSrc`.
+- Videos: Resolves `media.currentSrc`, `media.src`, or `<source src>`.
+- When "Open in Player" is triggered, `fetch(blobUrl)` extracts the raw decrypted bytes into an `ArrayBuffer` within the page's execution context.
 
-Toystaller dynamically injects `platforms/instagram.js` and `page_interceptor.js` directly into the **MAIN world** using standard script tag injection at `document_start`:
+### 4.2 The Anti-Redirect In-Browser HTML5 Player (CDN 302 Bypass)
+When direct CDN video links (`*.whatsapp.net`, `*.fbcdn.net`) are opened as top-level navigation, CDNs return HTTP 302 Redirects.
+Toystaller solves this 100% client-side:
+1. Media is opened via `player.html?url=${encodeURIComponent(url)}` or `player.html?id=${mediaId}`.
+2. Inside `player.html`, the media is consumed by a native `<video id="videoPlayer" controls autoplay playsinline>` element.
+3. Requests sent by HTML `<video>` elements carry `Sec-Fetch-Dest: video` and `Sec-Fetch-Mode: no-cors`.
+4. In combination with `rules.json` (`declarativeNetRequest`) injecting `Referer: https://web.whatsapp.com/` and `Origin: https://web.whatsapp.com`, CDNs recognize genuine embedded playback and return **HTTP 200 / 206 Partial Content** master streams.
 
-```javascript
-const script = document.createElement('script');
-script.src = chrome.runtime.getURL('page_interceptor.js');
-(document.head || document.documentElement).appendChild(script);
-script.remove();
-```
+### 4.3 Overlay Manager & Permanently Locked Corner Engine
+- **Corner Locking**: When an overlay is initialized, `pickBestCorner(media, rect, container)` analyzes surrounding controls and selects the optimal corner (`top-right`, `top-left`, or `bottom-right`).
+- **Immutability on Scroll**: Once locked in `entry.corner`, the position is never dynamically changed or shifted across corners while the user scrolls.
 
-### 4.2 React Fiber State Inspection Engine
-Instagram's React components store their full data models (including direct CDN URLs, progressive MP4 streams, and multi-resolution image arrays) inside internal DOM node properties prefixed with `__reactFiber$` or `__reactProps$`.
+### 4.4 Sticky Header Clearance & Scroll Disappearance
+- When a chat media bubble scrolls underneath WhatsApp's sticky conversation header (`#main header`, `top < topNavHeight + 4`), the overlay is immediately hidden (`display: 'none'; visibility: 'hidden';`).
+- In Status Viewer mode (`wa-status`), `top >= 90px` is enforced, guaranteeing buttons sit safely below WhatsApp's native Play/Pause and Mute controls.
 
-When a user hovers or clicks a media item:
-1. The extension queries the target `<video>` or `<img>` DOM node.
-2. Traverses parent ancestors up to 12 levels in the DOM tree looking for Fiber instances.
-3. Recursively scans the Fiber state tree for candidate fields:
-   - `video_versions`: Array of streams ordered by bitrate and resolution (`height: 1080`, `height: 720`).
-   - `image_versions2.candidates`: Array of image objects ordered by resolution (`width: 1440`, `width: 1080`).
-   - `display_url` / `display_resources`: Direct CDN links.
-   - `progressiveUrl` / `streamingUrl`: High-bandwidth master MP4 streams.
+### 4.5 DeclarativeNetRequest & Referer Header Pipeline
+Configured in `rules.json`:
+- Intercepts requests targeting `||whatsapp.net` and `||whatsapp.com`.
+- Sets `Referer` to `https://web.whatsapp.com/` and `Origin` to `https://web.whatsapp.com` for `main_frame`, `sub_frame`, `media`, and `xmlhttprequest`.
 
-### 4.3 Dynamic Network Interception Pipeline
-In addition to React Fiber inspection, `page_interceptor.js` monkey-patches `window.fetch` and `window.XMLHttpRequest` at runtime:
-- Watches for responses from `/graphql/query/`, `instagram.com/api/v1/`, and `*.cdninstagram.com`.
-- Clones responses asynchronously without blocking page performance.
-- Parses JSON payloads in real time, harvesting valid video and image CDN URLs into an indexed memory set.
-- Automatically rejects thumbnail covers, DASH manifests (`.mpd`), and segmented chunks (`bytestart/byteend`) using an intelligent scoring algorithm:
-  $$\text{Score} = +10(\text{.mp4}) + 20(\text{1080p}) + 10(\text{720p}) - 50(\text{dash}) - 500(\text{thumbnail})$$
-
-### 4.4 Content Script & Cross-World Messaging
-Because the MAIN world interceptor and the Content Script live in different execution contexts, communication is handled via bi-directional asynchronous `window.postMessage` channels with unique random transaction IDs (`magic_get_react_url` ➔ `magic_response_react_url_${id}`) with a 350ms safety timeout fallback.
-
-### 4.5 Overlay Manager & Collision Resolution Engine
-Rather than altering Instagram's fragile layout by appending child elements inside `<video>` wrappers, `OverlayManager` appends all UI elements to `document.body` with `position: fixed` and `z-index: 2147483646`.
-
-Key features:
-- **`ResizeObserver`**: Instantly tracks changes in media dimensions and viewport scaling.
-- **`IntersectionObserver`**: Deactivates overlays for off-screen media (threshold: 15%).
-- **Collision Avoidance (`cornerHasConflict`)**: Detects native Instagram interactive controls (Mute, Volume, Close, Share, Like) and automatically shifts buttons to alternative corners (`top-left` ➔ `bottom-left` ➔ `top-right`).
-
-### 4.6 Modal Isolation & Zero-Bleed Backdrop Engine
-On Instagram user profile pages (`https://www.instagram.com/<username>/`), clicking any grid item creates a `<div role="dialog">` modal over the existing 20+ grid items.
-
-**The Zero-Bleed Solution:**
-1. A real-time `MutationObserver` on `document.body` monitors modal creation/removal.
-2. When a modal opens (`hasActiveModal() === true`), all background overlays outside the modal are immediately forced to `display: none; visibility: hidden; pointer-events: none;`.
-3. Pointer hit testing (`document.elementsFromPoint`) verifies that cursor coordinates directly intersect with the active modal media before allowing any overlay to display.
-
-### 4.7 DeclarativeNetRequest & Referer Header Spoofing
-When opening direct CDN links (`https://scontent.cdninstagram.com/...`) in a new browser tab, Instagram returns HTTP 403 Forbidden because the request lacks an internal Instagram Referer header.
-
-Toystaller includes a declarative net request ruleset in `rules.json`:
-```json
-[
-  {
-    "id": 1,
-    "priority": 1,
-    "action": {
-      "type": "modifyHeaders",
-      "requestHeaders": [
-        {
-          "header": "Referer",
-          "operation": "set",
-          "value": "https://www.instagram.com/"
-        }
-      ]
-    },
-    "condition": {
-      "urlFilter": "||cdninstagram.com",
-      "resourceTypes": ["main_frame", "sub_frame", "media", "xmlhttprequest"]
-    }
-  }
-]
-```
-This ensures uninhibited playback and clean direct file downloads in any browser tab.
+### 4.6 Background Service Worker & Memory Buffer Transfer
+In `background_script.js`:
+- Transferred `ArrayBuffer` payloads from decrypted blobs are temporarily cached in an in-memory `Map` keyed by a unique token.
+- `chrome.tabs.create()` opens `player.html?id=${id}`.
+- `player.js` requests the buffer via `getPlayerMedia` and cleans up memory immediately. Automatic 60-second garbage collection prevents memory leaks.
 
 ---
 
-## 5. Instagram Section-by-Section Handler Matrix
+## 5. WhatsApp Section-by-Section Handler Matrix
 
-```mermaid
-graph TD
-    URL[Current Instagram URL] --> Route{Route Classifier}
-    Route -->|hasActiveModal| Modal[Modal Post Handler]
-    Route -->|/reels/ or /reel/| Reels[Reels Video Handler]
-    Route -->|/stories/| Stories[Stories Fullscreen Handler]
-    Route -->|/direct/| DMs[Direct Messages Handler]
-    Route -->|/| Feed[Home Feed Handler]
-    Route -->|/username/| Profile[Profile Grid Handler]
-```
-
-| Section | Detection Rule | Target Strategy | Filter Strategy |
-| :--- | :--- | :--- | :--- |
-| **Modal Dialog** | `[role="dialog"], [aria-modal="true"]` | Topmost post media, carousel visible slide | Rejects all background grid items, comment avatars, suggested accounts |
-| **Profile Grid** | `/<username>/`, `/<username>/saved/` | Grid post tiles (`scale: 0.75`), header avatar (`scale: 0.8`) | Rejects story highlight circles (`[role="menu"]`), icons `< 80px` |
-| **Reels** | `/reels/`, `/reel/<id>/` | Viewport-centered active vertical reel | Rejects side preview thumbnails, comment icons |
-| **Feed** | `/` (Home) | Main post `<article>` media | Rejects top story tray circles, author avatars |
-| **Stories** | `/stories/<username>/<id>/` | Screen-centered active story | Rejects blurred left/right story preview cards |
-| **Direct Messages** | `/direct/` | Chat media attachments (`> 150px`) | Rejects contact avatars in sidebar list |
+| Section Key | Detection Selector | Preferred Corner | Offsets | Smart Filtering |
+| :--- | :--- | :--- | :--- | :--- |
+| `wa-status` | `status-v3-main`, `status-viewer`, status progress bars | `top-right`, `bottom-right` | `topOffset: 92px`, `bottomOffset: 84px` | Strict modal isolation; clears top controls and bottom reply drawer |
+| `wa-media-viewer` | `[data-animate-media-viewer]`, `media-viewer-modal` | `top-left`, `bottom-right` | `topOffset: 72px`, `bottomOffset: 60px` | Suppresses background chat buttons; clears top-right close/forward/star icons |
+| `wa-chat` | `div[role="row"]`, `msg-container` | `top-right`, `bottom-right` | `padding: 8px` | Ignores emojis, sticker previews, reaction pills, and voice notes |
+| `wa-profile` | `drawer-right`, `chat-info-drawer` | `top-right`, `bottom-right` | `padding: 12px` | Excludes small contact list avatars (< 60px) |
 
 ---
 
 ## 6. Performance, Memory & Lifecycle Optimization
 
-- **Throttled Pointer Events**: Mousemove handlers are throttled to 30ms intervals to eliminate frame drops and maintain 60/120fps scrolling.
-- **Garbage Collection Safety**: DOM nodes are tracked in `Map` collections; when media elements are detached from the DOM, their corresponding observers and overlay containers are disconnected and removed.
-- **Context Invalidation Protection**: All background messaging calls are wrapped in `safeSendMessage` try-catch blocks to prevent console warnings when the extension is updated or reloaded during an active session.
+1. **Passive Scroll Listeners**: Scroll events are observed with `{ passive: true, capture: true }` and throttled pointer tracking (30ms).
+2. **Observer Cleanup**: Disconnected media elements immediately have their `ResizeObserver` and `IntersectionObserver` disconnected and overlays removed from the DOM.
+3. **Blob URL Revocation**: `URL.revokeObjectURL()` is called upon download completion and player page unloads.
 
 ---
 
 ## 7. Security, Sandboxing & Privacy Guarantees
 
-1. **Zero External Communication**: The extension never makes network calls to external analytical, tracking, or proxy servers. All requests remain within `instagram.com` and `cdninstagram.com`.
-2. **Read-Only Inspection**: React Fiber states and GraphQL responses are read in memory without modifying client-side session tokens, cookies, or account credentials.
-3. **Shadow DOM Isolation**: The dashboard UI is rendered inside a closed-mode `ShadowRoot`, completely immune to host page CSS pollution.
+- **No Remote Code Execution**: Strict CSP compliant with Manifest V3. No `eval()`, inline scripts, or external CDNs.
+- **Client-Side Exclusivity**: Decrypted media and credentials never leave the user's browser session.
+- **Account Safety**: Operates through standard user interactions with zero unauthorized API calls or scraping behavior.
 
 ---
 
-## 8. Comparison with Alternative Approaches
+## 8. Global Multi-Platform Ecosystem
 
-| Feature / Metric | Toystaller: Instagram Edition | Generic Web Scraper / Web Tools | DOM Video Scraping Extensions |
-| :--- | :--- | :--- | :--- |
-| **Video Quality** | **1080p / Original Master MP4** | Often capped at 720p | Capped at compressed preview |
-| **Image Resolution** | **Uncompressed (up to 1440p)** | Compressed JPEG | Screen-size cropped preview |
-| **Account Safety** | **100% Safe (Local client-side)** | High risk (Requires login/cookies) | Safe |
-| **Speed** | **Instant (0 ms network overhead)** | Slow (Server processing time) | Instant |
-| **Advertisements / Trackers** | **None (Zero)** | Heavy Adware / Popups | Minimal |
-| **Private Account Support** | **Yes (If you follow the account)** | No | Limited |
-
----
-
-## 9. Global Multi-Platform Ecosystem
-
-Toystaller was engineered as a modular framework. While this repository represents the **specialized standalone edition for Instagram**, the **Main Global Repository** provides multi-platform capabilities across the entire social web:
-
-- 📷 **Instagram**: Reels, Stories, High-Res Posts, Profile Avatars, DMs.
-- 💼 **LinkedIn**: Uncompressed Document Images, Native Video Streams.
-- 📘 **Facebook**: Mobile & Desktop Progressive Video Extraction, High-Res Photos.
-- 💬 **WhatsApp Web**: Full-Resolution Media Attachments & Voice Notes.
-
-👉 **Explore the Main Project:** [https://github.com/SudiptaSanki/Toystaller](https://github.com/SudiptaSanki/Toystaller)
-
----
-
-<div align="center">
-<b>Toystaller Architecture Documentation</b> • Maintained by <a href="https://github.com/SudiptaSanki">Sudipta Sanki</a>
-</div>
+| Specialized Edition | Repository | Primary Target |
+| :--- | :--- | :--- |
+| **WhatsApp Edition** | [Toystaller-WhatsApp](https://github.com/SudiptaSanki/Toystaller-WhatsApp) | `web.whatsapp.com` |
+| **Facebook Edition** | [Toystaller-Facebook](https://github.com/SudiptaSanki/Toystaller-Facebook) | `facebook.com` |
+| **Instagram Edition** | [Toystaller-Instagram](https://github.com/SudiptaSanki/Toystaller-Instagram) | `instagram.com` |
+| **Global Suite** | [Toystaller](https://github.com/SudiptaSanki/Toystaller) | Multi-Platform |

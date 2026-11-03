@@ -1,29 +1,29 @@
-// page_interceptor.js
-// Runs in the page context. Intercepts fetch/XHR for CDN video URLs
+// core/interceptor_core.js
+// Runs in the MAIN page world. Intercepts fetch/XHR for CDN video URLs
 // and exposes a React Fiber extractor for accurate per-video URL lookup.
+// Platform-specific behavior is delegated to window.ToystallerPlatform (singular).
 
 (function () {
     'use strict';
-    // Guard: prevent double-execution if loaded via both manifest and dynamic injection
     if (window.__toystallerInterceptorLoaded) return;
     window.__toystallerInterceptorLoaded = true;
 
-    const VIDEO_KEYS = new Set([
-        'video_url', 'playback_url', 'src', 'url', 'dash_manifest',
-        'progressiveUrl', 'downloadUrl', 'streamingUrl', 'videoUrl',
-        'progressiveStreams', 'transcodedVideoUrl',
-        'playable_url', 'playable_url_quality_hd',
-        'adaptiveStreams', 'mediaUrl',
-        'media', 'rootUrl', 'liveVideoUrl', 'thumbnail'
-    ]);
-
+    // The active platform object — set by the platform's interceptor.js before this file loads.
+    // Falls back to a no-op generic if not set.
     const getPlatform = () => {
-        return window.ToystallerPlatforms['instagram'];
+        return window.ToystallerPlatform || {
+            name: 'generic',
+            shouldSkipReactValue() { return false; },
+            looksLikeReactVideo(val) { return val.toLowerCase().includes('.mp4'); },
+            looksLikeReactImage(val, key) { return key.toLowerCase().includes('image') || val.toLowerCase().includes('.jpg'); },
+            extractPriorityReactUrl() { return null; },
+            extractVideoUrlFromDOM() { return null; },
+            isValidVideo() { return true; },
+            getInterceptUrls() { return []; }
+        };
     };
 
-    function isValidVideo(url) {
-        return getPlatform().isValidVideo ? getPlatform().isValidVideo(url) : true;
-    }
+    // --- Network Interception: Scan JSON responses for video URLs ---
 
     function findVideoUrls(obj, found = new Set(), depth = 0) {
         if (depth > 12 || !obj || typeof obj !== 'object') return found;
@@ -58,23 +58,31 @@
 
     function dispatchVideoUrls(urls) {
         if (!urls || urls.size === 0) return;
-        window.postMessage({ 
-            type: 'toystaller_video_urls', 
-            urls: Array.from(urls) 
+        window.postMessage({
+            type: 'toystaller_video_urls',
+            urls: Array.from(urls)
         }, '*');
     }
 
+    // Get the list of URL patterns to intercept from the platform
+    const getInterceptPatterns = () => {
+        const platform = getPlatform();
+        return platform.getInterceptUrls ? platform.getInterceptUrls() : [];
+    };
+
+    const shouldIntercept = (url) => {
+        const patterns = getInterceptPatterns();
+        if (patterns.length === 0) return false;
+        return patterns.some(pattern => url.includes(pattern));
+    };
+
+    // Patch fetch()
     const originalFetch = window.fetch;
     window.fetch = async function (...args) {
         const response = await originalFetch.apply(this, args);
         try {
             const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
-            if (
-                url.includes('instagram.com') ||
-                url.includes('graph.') ||
-                url.includes('/api/v') ||
-                url.includes('graphql')
-            ) {
+            if (shouldIntercept(url)) {
                 const clone = response.clone();
                 clone.json().then(data => {
                     const foundVideos = findVideoUrls(data);
@@ -85,6 +93,7 @@
         return response;
     };
 
+    // Patch XMLHttpRequest
     const OriginalXHR = window.XMLHttpRequest;
     function PatchedXHR() {
         const xhr = new OriginalXHR();
@@ -96,11 +105,7 @@
         };
         xhr.addEventListener('load', function () {
             try {
-                if (
-                    reqUrl.includes('instagram.com') ||
-                    reqUrl.includes('/api/v') ||
-                    reqUrl.includes('graphql')
-                ) {
+                if (shouldIntercept(reqUrl)) {
                     const data = JSON.parse(this.responseText);
                     const foundVideos = findVideoUrls(data);
                     dispatchVideoUrls(foundVideos);
@@ -111,6 +116,8 @@
     }
     PatchedXHR.prototype = OriginalXHR.prototype;
     window.XMLHttpRequest = PatchedXHR;
+
+    // --- React Fiber Extraction ---
 
     function searchObjForVideoUrl(obj, seen = new Set(), depth = 0, isVideoContext = true) {
         if (depth > 12 || !obj || typeof obj !== 'object') return null;
@@ -166,7 +173,7 @@
         }
 
         for (let i = 0; i < 12 && current; i++) {
-            const key = Object.keys(current).find(k => k.startsWith('__reactProps$') || 
+            const key = Object.keys(current).find(k => k.startsWith('__reactProps$') ||
                 k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
             if (key && current[key]) {
                 const found = searchObjForVideoUrl(current[key], new Set(), 0, isVideoContext);
@@ -178,7 +185,7 @@
         return null;
     }
 
-    // Facebook-specific: Parse relay data from <script> tags to find progressive video URLs
+    // --- Message handler for content script requests ---
 
     window.addEventListener('message', (e) => {
         if (!e.data || e.data.type !== 'magic_get_react_url' || !e.data.id) return;
