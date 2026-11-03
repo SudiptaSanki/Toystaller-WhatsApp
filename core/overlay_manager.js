@@ -4,6 +4,7 @@
 // - Permanently locked corners per media element (never jumps down on scroll)
 // - Clean disappearance when media scrolls behind sticky headers / navbars
 // - Section-aware modal isolation (Chats, Status, Media Lightbox, Profile)
+// - Content-box detection (getRenderedMediaRect) for letterboxed/pillarboxed status videos
 // - Clamped ancestor visibility checking and per-section toggles
 
 class OverlayManager {
@@ -94,7 +95,7 @@ class OverlayManager {
         const platform = this._getPlatform();
         const section = platform && platform.getSection ? platform.getSection(media) : '';
         if (section === 'wa-status') {
-            return 85;
+            return 75;
         }
         if (section === 'wa-media-viewer') {
             return 60;
@@ -147,7 +148,6 @@ class OverlayManager {
 
         let host = media;
         let node = media.parentElement;
-
         for (let depth = 0; node && depth < 6; depth++, node = node.parentElement) {
             const rect = node.getBoundingClientRect();
             if (rect.width < 40 || rect.height < 40) break;
@@ -183,6 +183,12 @@ class OverlayManager {
                 const ov = style.overflow + style.overflowX + style.overflowY;
                 if (ov.includes('hidden') || ov.includes('scroll') || ov.includes('auto') || ov.includes('clip')) {
                     const pRect = node.getBoundingClientRect();
+                    // Ignore full viewport or large overlay ancestors
+                    if (pRect.width >= window.innerWidth * 0.9 && pRect.height >= window.innerHeight * 0.9) {
+                        node = node.parentElement;
+                        depth++;
+                        continue;
+                    }
                     if (elRect.bottom < pRect.top || elRect.top > pRect.bottom ||
                         elRect.right < pRect.left || elRect.left > pRect.right) {
                         return true;
@@ -324,7 +330,7 @@ class OverlayManager {
                 this._hide(entry);
             }
             this.activeEntry = null;
-        }, 300);
+        }, 250);
     }
 
     addOverlay(media, createButtonsFn) {
@@ -384,7 +390,7 @@ class OverlayManager {
             resizeObserver.observe(hoverHost);
         }
 
-        const entry = { container, corner: null, resizeObserver, hoverHost, isVisible: false, intersectionObserver: null };
+        const entry = { container, corner: null, resizeObserver, hoverHost, isVisible: true, intersectionObserver: null };
         
         entry.intersectionObserver = new IntersectionObserver((entries) => {
             for (const e of entries) {
@@ -405,6 +411,10 @@ class OverlayManager {
         if (el.closest('.magic-dl-overlay')) return false;
         if (el === media || media.contains(el)) return false;
 
+        const elRect = el.getBoundingClientRect();
+        // Ignore large container elements or full-screen overlays
+        if (elRect.width > 250 && elRect.height > 250) return false;
+
         const tag = el.tagName.toLowerCase();
         const role = (el.getAttribute('role') || '').toLowerCase();
         const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
@@ -415,7 +425,7 @@ class OverlayManager {
 
         const controlHints = ['close', 'dismiss', 'minimize', 'expand', 'fullscreen', 'menu', 'more', 'options', 'share',
                                'mute', 'unmute', 'volume', 'sound', 'play', 'pause', 'like', 'comment', 'follow',
-                               'audio', 'speaker', 'forward', 'rewind', 'skip', 'next', 'previous', 'seek', 'star', 'reply'];
+                               'audio', 'speaker', 'forward', 'rewind', 'seek', 'star', 'reply'];
         const hintText = `${ariaLabel} ${title} ${className}`;
         if (controlHints.some(hint => hintText.includes(hint))) return true;
 
@@ -424,11 +434,11 @@ class OverlayManager {
         if (el.closest('button, [role="button"], [role="menuitem"]')) return true;
 
         // Header controls inside WhatsApp status or media viewer dialog
-        if (el.closest('header, [data-testid*="header"], [data-testid="status-header"], [data-testid="status-v3-main"] > div:first-child')) return true;
+        if (el.closest('header, [data-testid*="header"], [data-testid="status-header"]')) return true;
         if (el.closest('button[aria-label*="Play" i], button[aria-label*="Pause" i], button[aria-label*="Mute" i], button[aria-label*="Unmute" i], button[aria-label*="Close" i], button[aria-label*="More" i]')) return true;
 
         const style = window.getComputedStyle(el);
-        if (style.pointerEvents !== 'none' && parseInt(style.zIndex, 10) > 5000) return true;
+        if (style.pointerEvents !== 'none' && parseInt(style.zIndex, 10) > 5000 && elRect.width < 150) return true;
 
         return false;
     }
@@ -438,10 +448,51 @@ class OverlayManager {
         if (platform && platform.getPlatformConfig) {
             return platform.getPlatformConfig(media || window.location.pathname.toLowerCase());
         }
-        return { preferredCorners: ['top-right', 'top-left', 'bottom-right'], padding: 12 };
+        return { preferredCorners: ['top-right', 'top-left', 'bottom-right'], padding: 10 };
     }
 
-    cornerHasConflict(media, rect, corner, width, height, pad = 12) {
+    // Calculates the true rendered boundaries of media elements with object-fit: contain (letterbox / pillarbox)
+    getRenderedMediaRect(media) {
+        const rect = media.getBoundingClientRect();
+        const style = window.getComputedStyle(media);
+        const objectFit = style.objectFit;
+
+        const naturalWidth = media.videoWidth || media.naturalWidth;
+        const naturalHeight = media.videoHeight || media.naturalHeight;
+
+        if (objectFit !== 'contain' || !naturalWidth || !naturalHeight || rect.width === 0 || rect.height === 0) {
+            return rect;
+        }
+
+        const containerRatio = rect.width / rect.height;
+        const mediaRatio = naturalWidth / naturalHeight;
+
+        let renderedWidth = rect.width;
+        let renderedHeight = rect.height;
+        let renderedLeft = rect.left;
+        let renderedTop = rect.top;
+
+        if (containerRatio > mediaRatio) {
+            // Pillarboxed: Black bars on left and right
+            renderedWidth = rect.height * mediaRatio;
+            renderedLeft = rect.left + (rect.width - renderedWidth) / 2;
+        } else {
+            // Letterboxed: Black bars on top and bottom
+            renderedHeight = rect.width / mediaRatio;
+            renderedTop = rect.top + (rect.height - renderedHeight) / 2;
+        }
+
+        return {
+            top: renderedTop,
+            left: renderedLeft,
+            bottom: renderedTop + renderedHeight,
+            right: renderedLeft + renderedWidth,
+            width: renderedWidth,
+            height: renderedHeight
+        };
+    }
+
+    cornerHasConflict(media, rect, corner, width, height, pad = 10) {
         const config = this.getPlatformConfig(media);
         const topOffset = config.topOffset || 0;
         const bottomOffset = config.bottomOffset || 0;
@@ -468,7 +519,7 @@ class OverlayManager {
                 break;
         }
 
-        // Test multiple points across the proposed button bounds
+        // Test points across proposed bounds
         const testPoints = [
             { x: left + 6, y: top + 6 },
             { x: left + width / 2, y: top + height / 2 },
@@ -491,8 +542,8 @@ class OverlayManager {
     pickBestCorner(media, rect, container) {
         const config = this.getPlatformConfig(media);
         const preferred = config.preferredCorners || ['top-right', 'top-left', 'bottom-right'];
-        const pad = config.padding !== undefined ? config.padding : 12;
-        const width = container.offsetWidth || 84;
+        const pad = config.padding !== undefined ? config.padding : 10;
+        const width = container.offsetWidth || 76;
         const height = container.offsetHeight || 34;
 
         for (const corner of preferred) {
@@ -503,8 +554,6 @@ class OverlayManager {
         return preferred[0] || 'top-right';
     }
 
-    // Compute the actually visible portion of a media element by intersecting
-    // its rect with all overflow-clipping ancestors and the viewport.
     _getVisibleRect(media) {
         let vRect = media.getBoundingClientRect();
         let visTop = vRect.top;
@@ -520,10 +569,13 @@ class OverlayManager {
                 const ov = style.overflow + style.overflowX + style.overflowY;
                 if (ov.includes('hidden') || ov.includes('scroll') || ov.includes('auto') || ov.includes('clip')) {
                     const pRect = node.getBoundingClientRect();
-                    visTop = Math.max(visTop, pRect.top);
-                    visLeft = Math.max(visLeft, pRect.left);
-                    visBottom = Math.min(visBottom, pRect.bottom);
-                    visRight = Math.min(visRight, pRect.right);
+                    // Ignore full viewport ancestors
+                    if (pRect.width < window.innerWidth * 0.95 || pRect.height < window.innerHeight * 0.95) {
+                        visTop = Math.max(visTop, pRect.top);
+                        visLeft = Math.max(visLeft, pRect.left);
+                        visBottom = Math.min(visBottom, pRect.bottom);
+                        visRight = Math.min(visRight, pRect.right);
+                    }
                 }
             }
             node = node.parentElement;
@@ -551,31 +603,34 @@ class OverlayManager {
 
     applyCornerPosition(rect, container, corner, media) {
         const config = this.getPlatformConfig(media);
-        const pad = config.padding !== undefined ? config.padding : 12;
+        const pad = config.padding !== undefined ? config.padding : 10;
         const topOffset = config.topOffset || 0;
         const bottomOffset = config.bottomOffset || 0;
-        const width = container.offsetWidth || 84;
+        const width = container.offsetWidth || 76;
         const height = container.offsetHeight || 34;
+
+        // Use precise rendered rect (excludes letterbox black bars in status / media viewer)
+        const activeRect = media ? this.getRenderedMediaRect(media) : rect;
 
         let top, left;
 
         switch (corner) {
             case 'bottom-right':
-                top = rect.bottom - height - pad - bottomOffset;
-                left = rect.right - width - pad;
+                top = activeRect.bottom - height - pad - bottomOffset;
+                left = activeRect.right - width - pad;
                 break;
             case 'bottom-left':
-                top = rect.bottom - height - pad - bottomOffset;
-                left = rect.left + pad;
+                top = activeRect.bottom - height - pad - bottomOffset;
+                left = activeRect.left + pad;
                 break;
             case 'top-left':
-                top = rect.top + pad + topOffset;
-                left = rect.left + pad;
+                top = activeRect.top + pad + topOffset;
+                left = activeRect.left + pad;
                 break;
             case 'top-right':
             default:
-                top = rect.top + pad + topOffset;
-                left = rect.right - width - pad;
+                top = activeRect.top + pad + topOffset;
+                left = activeRect.right - width - pad;
                 break;
         }
 
@@ -583,19 +638,13 @@ class OverlayManager {
         const section = platform && platform.getSection ? platform.getSection(media) : 'wa-chat';
         const inModal = platform && platform.isInsideModal ? platform.isInsideModal(media) : false;
         const isStatus = section === 'wa-status';
-        const topNavHeight = inModal ? (isStatus ? 85 : 0) : this._getTopNavHeight(media);
+        const topNavHeight = inModal ? (isStatus ? 75 : 0) : this._getTopNavHeight(media);
 
-        // 1. Strict Top Boundary:
-        // As media scrolls, keep button locked in place! When its corner reaches under the top navbar/header,
-        // HIDE it cleanly — NEVER dynamically jump down to bottom-right or slide along the header!
-        if (top < topNavHeight + 4) {
-            container.style.display = 'none';
-            container.style.visibility = 'hidden';
-            return;
-        }
-
-        // 2. Status reply drawer / bottom bounds:
+        // Status viewer boundary guards:
         if (isStatus) {
+            // Guarantee buttons never overlap with WhatsApp status top header (progress bar, close, mute)
+            top = Math.max(top, 78);
+            // Guarantee buttons never overlap with WhatsApp status bottom reply drawer
             if (top + height > window.innerHeight - 75) {
                 container.style.display = 'none';
                 container.style.visibility = 'hidden';
@@ -603,14 +652,23 @@ class OverlayManager {
             }
         }
 
-        // 3. Viewport Boundaries:
+        // Strict Top Boundary for scrollable chat feed:
+        // As media scrolls, keep button locked in place! When its corner reaches under the top navbar,
+        // HIDE it cleanly — NEVER dynamically jump down to bottom-right!
+        if (top < topNavHeight + 4) {
+            container.style.display = 'none';
+            container.style.visibility = 'hidden';
+            return;
+        }
+
+        // Viewport Boundaries:
         if (top + height > window.innerHeight - 4 || left < 2 || left + width > window.innerWidth - 2) {
             container.style.display = 'none';
             container.style.visibility = 'hidden';
             return;
         }
 
-        // 4. Overflow container / ancestor clipping:
+        // Overflow container / ancestor clipping check
         const vis = media ? this._getVisibleRect(media) : rect;
         if (top < vis.top - 2 || top + height > vis.bottom + 2 || left < vis.left - 2 || left + width > vis.right + 2) {
             container.style.display = 'none';

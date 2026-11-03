@@ -61,19 +61,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'createPlayerTab' || request.action === 'createViewerTab') {
         const id = 'player_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
         viewerMediaCache.set(id, {
+            dataUrl: request.dataUrl,
+            url: request.url,
             buffer: request.buffer,
             mimeType: request.mimeType,
-            isVideo: request.isVideo,
+            isVideo: request.isVideo !== undefined ? request.isVideo : true,
             filename: request.filename,
             timestamp: Date.now()
         });
 
-        // 60-second automatic garbage collection if tab isn't opened
+        // 120-second automatic garbage collection if tab isn't opened
         setTimeout(() => {
             if (viewerMediaCache.has(id)) {
                 viewerMediaCache.delete(id);
             }
-        }, 60000);
+        }, 120000);
 
         chrome.tabs.create({ url: chrome.runtime.getURL(`player.html?id=${id}`) }, (tab) => {
             if (chrome.runtime.lastError) {

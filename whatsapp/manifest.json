@@ -16,7 +16,8 @@
     "scripting",
     "downloads",
     "tabs",
-    "storage"
+    "storage",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "*://web.whatsapp.com/*",
@@ -53,7 +54,8 @@
         "platform.js",
         "core/interceptor_core.js",
         "player.html",
-        "player.js"
+        "player.js",
+        "icon.png"
       ],
       "matches": ["*://web.whatsapp.com/*"]
     }

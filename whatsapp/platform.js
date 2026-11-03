@@ -1,3 +1,7 @@
+// platform.js
+// Specialized WhatsApp Platform Layer for Toystaller v1.0
+// Supports: Chat Conversation Messages, Status/Stories Viewer, Fullscreen Media Lightbox, and Contact Info Drawer.
+
 window.ToystallerPlatforms = window.ToystallerPlatforms || {};
 
 (function() {
@@ -11,7 +15,7 @@ window.ToystallerPlatforms = window.ToystallerPlatforms || {};
             // Check specific element context first if provided
             if (targetMedia && targetMedia.nodeType) {
                 // Priority 1: Fullscreen status / story viewer
-                if (targetMedia.closest('[data-animate-status-v3="true"], div[data-testid="status-v3-main"], div[data-testid="status-viewer"]')) {
+                if (targetMedia.closest('[data-animate-status-v3="true"], div[data-testid="status-v3-main"], div[data-testid="status-viewer"], div[aria-label*="Status" i]')) {
                     return 'wa-status';
                 }
                 const dialog = targetMedia.closest('div[role="dialog"], div[role="region"], div.app-wrapper-web');
@@ -70,29 +74,29 @@ window.ToystallerPlatforms = window.ToystallerPlatforms || {};
             let section = typeof sectionOrMedia === 'string' ? sectionOrMedia : this.getSection(sectionOrMedia);
 
             if (section === 'wa-status') {
-                // Completely clears WhatsApp status top header (progress bar, contact name, play/pause/mute buttons)
+                // Clear WhatsApp status top header (progress bar, contact info, play/pause/mute buttons)
                 // and bottom reply drawer ("Type a reply...")
                 return { 
-                    preferredCorners: ['top-right', 'bottom-right'], 
+                    preferredCorners: ['top-right', 'top-left'], 
                     padding: 16, 
-                    topOffset: 92,     // Guaranteed safe distance below native 65-72px status header
-                    bottomOffset: 84   // Guaranteed safe distance above bottom "Type a reply..." input
+                    topOffset: 75,     // Safe distance below native ~65px status header
+                    bottomOffset: 80   // Safe distance above bottom "Type a reply..." input
                 };
             }
             if (section === 'wa-media-viewer') {
                 // Keep buttons clear of WhatsApp top-right controls (Close, Forward, Star)
                 return { 
-                    preferredCorners: ['top-left', 'bottom-right', 'top-right'], 
+                    preferredCorners: ['top-left', 'top-right', 'bottom-right'], 
                     padding: 16, 
                     topOffset: 72,
                     bottomOffset: 60
                 };
             }
             if (section === 'wa-chat') {
-                return { preferredCorners: ['top-right', 'bottom-right', 'top-left'], padding: 8 };
+                return { preferredCorners: ['top-right', 'top-left', 'bottom-right'], padding: 8 };
             }
             
-            return { preferredCorners: ['top-right', 'top-left', 'bottom-right'], padding: 12 };
+            return { preferredCorners: ['top-right', 'top-left', 'bottom-right'], padding: 10 };
         },
 
         // --- Modal Detection ---
@@ -100,11 +104,20 @@ window.ToystallerPlatforms = window.ToystallerPlatforms || {};
 
         hasActiveModal() {
             const viewer = document.querySelector(this._modalSelector);
-            return viewer !== null && viewer.isConnected && viewer.offsetParent !== null;
+            if (!viewer || !viewer.isConnected) return false;
+            
+            // Note: Fixed-position elements have offsetParent === null in Blink/WebKit!
+            // We verify visibility via getComputedStyle and bounding dimensions.
+            const style = window.getComputedStyle(viewer);
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+                return false;
+            }
+            const rect = viewer.getBoundingClientRect();
+            return rect.width > 50 && rect.height > 50;
         },
 
         getActiveModal() {
-            return document.querySelector(this._modalSelector);
+            return this.hasActiveModal() ? document.querySelector(this._modalSelector) : null;
         },
 
         isInsideModal(media) {
@@ -125,7 +138,7 @@ window.ToystallerPlatforms = window.ToystallerPlatforms || {};
             if (this.hasActiveModal()) {
                 if (!this.isInsideModal(media)) return true;
                 
-                // Exclude tiny UI icons inside the modal
+                // Exclude tiny UI icons or small avatars inside the modal
                 if (rect.width < 70 || rect.height < 70) return true;
                 return false;
             }
@@ -135,7 +148,7 @@ window.ToystallerPlatforms = window.ToystallerPlatforms || {};
                 return true;
             }
 
-            // Exclude avatars with border-radius 50% or small width
+            // Exclude avatars with border-radius 50% or small dimensions
             if (rect.width <= 60 && rect.height <= 60) {
                 return true;
             }
@@ -171,7 +184,7 @@ window.ToystallerPlatforms = window.ToystallerPlatforms || {};
         },
 
         // --- Extraction Config ---
-        useDirectDownload: true,
+        useDirectDownload: false,
         useReactThumbnail: false,
 
         isInternalUrl(url) {
@@ -195,7 +208,7 @@ window.ToystallerPlatforms = window.ToystallerPlatforms || {};
             return candidates;
         },
         extractVideoUrlFromDOM(el) {
-            if (el.tagName.toLowerCase() === 'video') {
+            if (el && el.tagName && el.tagName.toLowerCase() === 'video') {
                 return el.currentSrc || el.src;
             }
             return null;

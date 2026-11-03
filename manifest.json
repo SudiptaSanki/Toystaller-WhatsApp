@@ -16,7 +16,8 @@
     "scripting",
     "downloads",
     "tabs",
-    "storage"
+    "storage",
+    "unlimitedStorage"
   ],
   "host_permissions": [
     "*://web.whatsapp.com/*",
@@ -53,7 +54,8 @@
         "page_interceptor.js",
         "platforms/whatsapp.js",
         "player.html",
-        "player.js"
+        "player.js",
+        "Toystaller_logo.png"
       ],
       "matches": ["*://web.whatsapp.com/*"]
     }

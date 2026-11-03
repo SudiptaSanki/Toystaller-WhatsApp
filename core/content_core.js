@@ -1,5 +1,5 @@
 // core/content_core.js
-// Toystaller: WhatsApp Edition — Specialized Media Extractor & Downloader.
+// Toystaller v1.0 (WhatsApp Edition) — Specialized Media Extractor & Button Injector.
 // Supports: Chat Conversation Images & Videos, Status/Stories Viewer, Fullscreen Media Lightbox, and Contact Info Drawer.
 
 const pageInterceptedVideoUrls = new Set();
@@ -24,73 +24,7 @@ function safeSendMessage(msg, callback) {
     }
 }
 
-// Native in-page Blob and media downloader for WhatsApp Web client-decrypted media
-async function downloadMediaBlob(url, isVideo = false) {
-    if (!url) {
-        console.warn('Toystaller: No media URL found to download.');
-        return false;
-    }
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const ext = isVideo ? 'mp4' : 'jpg';
-    const filename = `whatsapp_${isVideo ? 'video' : 'image'}_${timestamp}.${ext}`;
-
-    try {
-        if (url.startsWith('blob:') || url.startsWith('data:')) {
-            const response = await fetch(url);
-            const blob = await response.blob();
-            const objectUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = objectUrl;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                a.remove();
-                URL.revokeObjectURL(objectUrl);
-            }, 4000);
-            return true;
-        } else {
-            // Attempt clean fetch first to enforce custom filename
-            try {
-                const res = await fetch(url);
-                const blob = await res.blob();
-                const objectUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = objectUrl;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                setTimeout(() => {
-                    a.remove();
-                    URL.revokeObjectURL(objectUrl);
-                }, 4000);
-                return true;
-            } catch (err) {
-                safeSendMessage({ action: 'downloadMedia', url: url, filename: filename });
-                return true;
-            }
-        }
-    } catch (e) {
-        console.warn('Toystaller: Direct fetch failed, attempting anchor click fallback:', e);
-        try {
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => a.remove(), 2000);
-            return true;
-        } catch (e2) {
-            console.error('Toystaller: Download failed:', e2);
-            return false;
-        }
-    }
-}
-
-// Safely opens the image or video in a new dedicated viewer tab
+// Safely opens the image or video in a new dedicated viewer/player tab
 async function openMediaTab(url, isVideo = false) {
     if (!url) {
         console.warn('Toystaller: No media URL found to open.');
@@ -98,35 +32,48 @@ async function openMediaTab(url, isVideo = false) {
     }
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `whatsapp_${isVideo ? 'video' : 'image'}_${timestamp}.${isVideo ? 'mp4' : 'jpg'}`;
+    const ext = isVideo ? 'mp4' : 'jpg';
+    const filename = `whatsapp_${isVideo ? 'video' : 'image'}_${timestamp}.${ext}`;
 
     if (url.startsWith('blob:') || url.startsWith('data:')) {
         try {
             const res = await fetch(url);
             const blob = await res.blob();
-            const buffer = await blob.arrayBuffer();
 
-            safeSendMessage({
-                action: 'createPlayerTab',
-                buffer: buffer,
-                mimeType: blob.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
-                isVideo: isVideo,
-                filename: filename
-            }, (response) => {
-                if (!response || !response.success) {
-                    console.warn('Toystaller: Viewer tab creation returned unsuccessful, downloading directly:', response);
-                    downloadMediaBlob(url, isVideo);
-                }
-            });
+            // Convert to Base64 Data URL so it serializes cleanly without corruption in messaging
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const dataUrl = reader.result;
+                safeSendMessage({
+                    action: 'createPlayerTab',
+                    dataUrl: dataUrl,
+                    mimeType: blob.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+                    isVideo: isVideo,
+                    filename: filename
+                }, (response) => {
+                    if (!response || !response.success) {
+                        window.open(url, '_blank');
+                    }
+                });
+            };
+            reader.onerror = () => {
+                window.open(url, '_blank');
+            };
+            reader.readAsDataURL(blob);
             return;
         } catch (err) {
-            console.error('Toystaller: Failed to fetch media buffer for viewer tab:', err);
-            downloadMediaBlob(url, isVideo);
+            console.error('Toystaller: Failed to read media blob for viewer tab:', err);
+            window.open(url, '_blank');
         }
     } else {
-        safeSendMessage({ action: 'createPlayerTab', url: url, isVideo: isVideo, filename: filename }, (response) => {
+        safeSendMessage({ 
+            action: 'createPlayerTab', 
+            url: url, 
+            isVideo: isVideo, 
+            filename: filename 
+        }, (response) => {
             if (!response || !response.success) {
-                safeSendMessage({ action: 'openInNewTab', url: url });
+                safeSendMessage({ action: 'openInNewTab', url: url, isVideo: isVideo });
             }
         });
     }
@@ -146,19 +93,20 @@ function isRawMediaTab() {
 }
 
 function getActivePlatform() {
-    return window.ToystallerActivePlatform || window.ToystallerPlatforms['whatsapp'] || {
+    return window.ToystallerActivePlatform || (window.ToystallerPlatforms && window.ToystallerPlatforms['whatsapp']) || {
         name: 'whatsapp',
         hasActiveModal() { return false; },
         isInsideModal() { return false; },
         isThumbnail() { return false; },
         getButtonScale() { return 1; },
         filterBackgroundUrls(candidates) { return candidates; },
-        useDirectDownload: true,
+        useDirectDownload: false,
         isInternalUrl() { return true; }
     };
 }
 
 function getHighResImageUrl(media) {
+    if (!media) return null;
     let finalUrl = media.currentSrc || media.src;
 
     if (media.srcset) {
@@ -188,6 +136,13 @@ function getVideoUrl(media) {
     if (!url) {
         url = media.getAttribute('src') || '';
     }
+    // Check nested or adjacent video element if media is a container
+    if (!url && media.parentElement) {
+        const nested = media.parentElement.querySelector('video');
+        if (nested && nested !== media) {
+            url = nested.currentSrc || nested.src || '';
+        }
+    }
     return url;
 }
 
@@ -198,7 +153,42 @@ function getResolvedMediaUrl(media, isVideo) {
     return getHighResImageUrl(media);
 }
 
+// Active polling and event listener for media that is still buffering (e.g., status video newly opened)
+function resolveMediaWithWait(media, isVideo, timeoutMs = 2000) {
+    return new Promise((resolve) => {
+        let url = getResolvedMediaUrl(media, isVideo);
+        if (url) return resolve(url);
+
+        const startTime = Date.now();
+        const interval = setInterval(() => {
+            url = getResolvedMediaUrl(media, isVideo);
+            if (url) {
+                clearInterval(interval);
+                return resolve(url);
+            }
+            if (Date.now() - startTime >= timeoutMs) {
+                clearInterval(interval);
+                return resolve(null);
+            }
+        }, 120);
+
+        if (media && media.addEventListener) {
+            const onLoaded = () => {
+                cleanup();
+                resolve(getResolvedMediaUrl(media, isVideo));
+            };
+            const cleanup = () => {
+                media.removeEventListener('loadeddata', onLoaded);
+                media.removeEventListener('canplay', onLoaded);
+            };
+            media.addEventListener('loadeddata', onLoaded, { once: true });
+            media.addEventListener('canplay', onLoaded, { once: true });
+        }
+    });
+}
+
 function getVideoPosterUrl(media) {
+    if (!media) return null;
     let poster = media.getAttribute('poster');
     if (!poster) {
         let current = media;
@@ -242,74 +232,37 @@ function injectDownloadButtons() {
                     background-color: ${bgColor};
                     color: white;
                     border: 1.5px solid rgba(255,255,255,0.85);
-                    border-radius: 8px;
+                    border-radius: 7px;
                     cursor: pointer;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     pointer-events: auto;
-                    opacity: 0.9;
+                    opacity: 0.55;
                     transition: opacity 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.45);
                     transform: scale(${scale});
                     transform-origin: center;
                     margin: 0 3px;
                 `;
 
                 const iconSize = Math.round(16 * scale);
+                const arrowSvg = `<svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
+                const spinnerSvg = `<svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: toystaller-spin 0.8s linear infinite"><circle cx="12" cy="12" r="9" stroke-dasharray="28" stroke-dashoffset="10"></circle></svg>`;
 
-                // --- Button 1: WhatsApp Green Direct Download Button ---
-                const dlBtn = document.createElement('button');
-                dlBtn.className = 'magic-dl-btn';
-                dlBtn.title = isVideo ? 'Download WhatsApp Video' : 'Download WhatsApp Image';
-                const dlIconSvg = `<svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
-                dlBtn.innerHTML = dlIconSvg;
-                dlBtn.style.cssText = makeBtnStyle('#25D366');
+                // Ensure spinner animation is injected once
+                if (!document.getElementById('toystaller-spin-style')) {
+                    const styleEl = document.createElement('style');
+                    styleEl.id = 'toystaller-spin-style';
+                    styleEl.textContent = `@keyframes toystaller-spin { 100% { transform: rotate(360deg); } }`;
+                    (document.head || document.documentElement).appendChild(styleEl);
+                }
 
-                dlBtn.addEventListener('mouseenter', () => {
-                    dlBtn.style.opacity = '1';
-                    dlBtn.style.backgroundColor = '#1ebe5d';
-                });
-                dlBtn.addEventListener('mouseleave', () => {
-                    dlBtn.style.opacity = '0.9';
-                    dlBtn.style.backgroundColor = '#25D366';
-                });
-                dlBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    let url = getResolvedMediaUrl(media, isVideo);
-                    if (!url) {
-                        setTimeout(() => {
-                            url = getResolvedMediaUrl(media, isVideo);
-                            if (url) {
-                                downloadMediaBlob(url, isVideo);
-                            } else {
-                                alert("Media is still buffering in WhatsApp. Please try again in a moment.");
-                            }
-                        }, 350);
-                        return;
-                    }
-
-                    downloadMediaBlob(url, isVideo);
-
-                    // Micro-interaction: Checkmark confirmation feedback
-                    dlBtn.innerHTML = `<svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
-                    dlBtn.style.backgroundColor = '#128C7E';
-                    setTimeout(() => {
-                        dlBtn.innerHTML = dlIconSvg;
-                        dlBtn.style.backgroundColor = '#25D366';
-                    }, 1400);
-                });
-                buttons.push(dlBtn);
-
-                // --- Button 2: Blue Open in New Tab Button ---
+                // --- Button 1: Blue Arrow Button (Open Video/Image in new tab) ---
                 const openBtn = document.createElement('button');
                 openBtn.className = 'magic-open-btn';
-                openBtn.title = isVideo ? 'Open video in new tab' : 'Open image in new tab';
-                const openIconSvg = `<svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
-                const spinnerSvg = `<svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 0.8s linear infinite"><circle cx="12" cy="12" r="9" stroke-dasharray="28" stroke-dashoffset="10"></circle></svg>`;
-                openBtn.innerHTML = openIconSvg;
+                openBtn.title = isVideo ? 'Open HD video in new tab' : 'Open photo in new tab';
+                openBtn.innerHTML = arrowSvg;
                 openBtn.style.cssText = makeBtnStyle('rgba(30,30,30,0.75)');
 
                 openBtn.addEventListener('mouseenter', () => {
@@ -317,73 +270,86 @@ function injectDownloadButtons() {
                     openBtn.style.backgroundColor = 'rgba(52, 152, 219, 0.95)';
                 });
                 openBtn.addEventListener('mouseleave', () => {
-                    openBtn.style.opacity = '0.9';
+                    openBtn.style.opacity = '0.55';
                     openBtn.style.backgroundColor = 'rgba(30,30,30,0.75)';
                 });
                 openBtn.addEventListener('click', async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
 
-                    let url = getResolvedMediaUrl(media, isVideo);
-                    if (!url) {
-                        setTimeout(async () => {
-                            url = getResolvedMediaUrl(media, isVideo);
-                            if (url) {
-                                openBtn.innerHTML = spinnerSvg;
-                                await openMediaTab(url, isVideo);
-                                setTimeout(() => { openBtn.innerHTML = openIconSvg; }, 800);
-                            } else {
-                                alert("Media is still buffering in WhatsApp. Please try again in a moment.");
-                            }
-                        }, 350);
-                        return;
-                    }
-
                     openBtn.innerHTML = spinnerSvg;
-                    await openMediaTab(url, isVideo);
-                    setTimeout(() => { openBtn.innerHTML = openIconSvg; }, 800);
+                    let url = await resolveMediaWithWait(media, isVideo, 2000);
+                    if (url) {
+                        await openMediaTab(url, isVideo);
+                    } else {
+                        alert("Media is still buffering in WhatsApp. Please make sure playback starts and try again.");
+                    }
+                    setTimeout(() => { openBtn.innerHTML = arrowSvg; }, 600);
                 });
                 buttons.push(openBtn);
 
-                // --- Button 3: Video Poster / Thumbnail Download (Videos Only) ---
-                if (isVideo) {
-                    const thumbBtn = document.createElement('button');
-                    thumbBtn.className = 'magic-thumb-btn';
-                    thumbBtn.title = 'Download video thumbnail';
-                    thumbBtn.innerHTML = `<svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>`;
-                    thumbBtn.style.cssText = makeBtnStyle('rgba(30,30,30,0.75)');
+                // --- Button 2: Red Arrow Button (Open Thumbnail / Poster in new tab) ---
+                const imgBtn = document.createElement('button');
+                imgBtn.className = 'magic-img-btn';
+                imgBtn.title = isVideo ? 'Open thumbnail in new tab' : 'Open photo in new tab';
+                imgBtn.innerHTML = arrowSvg;
+                imgBtn.style.cssText = makeBtnStyle('rgba(30,30,30,0.75)');
 
-                    thumbBtn.addEventListener('mouseenter', () => {
-                        thumbBtn.style.opacity = '1';
-                        thumbBtn.style.backgroundColor = 'rgba(230, 126, 34, 0.95)';
-                    });
-                    thumbBtn.addEventListener('mouseleave', () => {
-                        thumbBtn.style.opacity = '0.9';
-                        thumbBtn.style.backgroundColor = 'rgba(30,30,30,0.75)';
-                    });
-                    thumbBtn.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
+                imgBtn.addEventListener('mouseenter', () => {
+                    imgBtn.style.opacity = '1';
+                    imgBtn.style.backgroundColor = 'rgba(231, 76, 60, 0.95)';
+                });
+                imgBtn.addEventListener('mouseleave', () => {
+                    imgBtn.style.opacity = '0.55';
+                    imgBtn.style.backgroundColor = 'rgba(30,30,30,0.75)';
+                });
+                imgBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
 
-                        const poster = getVideoPosterUrl(media);
+                    imgBtn.innerHTML = spinnerSvg;
+
+                    if (isVideo) {
+                        // 1. Try static poster attribute
+                        let poster = getVideoPosterUrl(media);
                         if (poster) {
-                            downloadMediaBlob(poster, false);
-                        } else {
-                            try {
-                                const canvas = document.createElement('canvas');
-                                canvas.width = media.videoWidth || 640;
-                                canvas.height = media.videoHeight || 360;
-                                const ctx = canvas.getContext('2d');
-                                ctx.drawImage(media, 0, 0, canvas.width, canvas.height);
-                                const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
-                                downloadMediaBlob(dataUrl, false);
-                            } catch (err) {
-                                console.warn('Toystaller: Could not capture video poster frame:', err);
+                            await openMediaTab(poster, false);
+                            setTimeout(() => { imgBtn.innerHTML = arrowSvg; }, 600);
+                            return;
+                        }
+
+                        // 2. Capture video frame via offscreen canvas
+                        try {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = media.videoWidth || 640;
+                            canvas.height = media.videoHeight || 360;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(media, 0, 0, canvas.width, canvas.height);
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+                            await openMediaTab(dataUrl, false);
+                        } catch (err) {
+                            console.warn('Toystaller: Could not capture frame from video:', err);
+                            // Fallback to video URL itself
+                            const vUrl = await resolveMediaWithWait(media, true, 1000);
+                            if (vUrl) {
+                                await openMediaTab(vUrl, true);
+                            } else {
+                                alert("No thumbnail available for this video.");
                             }
                         }
-                    });
-                    buttons.push(thumbBtn);
-                }
+                    } else {
+                        // Photo element: open full-resolution photo in new tab
+                        let imgUrl = await resolveMediaWithWait(media, false, 1000);
+                        if (imgUrl) {
+                            await openMediaTab(imgUrl, false);
+                        } else {
+                            alert("Could not extract image source.");
+                        }
+                    }
+
+                    setTimeout(() => { imgBtn.innerHTML = arrowSvg; }, 600);
+                });
+                buttons.push(imgBtn);
 
                 return buttons;
             };
@@ -482,7 +448,7 @@ function toggleDashboardOverlay() {
 
         <div class="dashboard">
             <div class="header">
-                <h2>Toystaller ${platform.version || 'v6.0'} — WhatsApp Edition</h2>
+                <h2>Toystaller ${platform.version || 'v1.0'} — WhatsApp Edition</h2>
                 <button class="close-btn" id="closeBtn" title="Close">&times;</button>
             </div>
             <div class="info-row">
@@ -490,7 +456,7 @@ function toggleDashboardOverlay() {
             </div>
             <div class="specialization">
                 <strong>WhatsApp Downloader:</strong><br/>
-                Download high-resolution images, videos, and status updates directly to your computer.
+                Download high-resolution images, videos, and status updates directly in high-quality new tabs.
             </div>
         </div>
     `;
