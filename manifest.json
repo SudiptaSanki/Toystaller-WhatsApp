@@ -30,6 +30,12 @@
   "content_scripts": [
     {
       "matches": ["*://web.whatsapp.com/*"],
+      "js": ["page_interceptor.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://web.whatsapp.com/*"],
       "js": [
         "platforms/whatsapp.js",
         "overlay_manager.js",
